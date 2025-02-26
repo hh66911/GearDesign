@@ -22,7 +22,7 @@ class Angle:
         minutes = (degrees - deg) * 60
         min = int(minutes)
         seconds = (minutes - min) * 60
-        return f'{deg}°{min}′{seconds : .2f}″'
+        return f"{deg}°{min}'{seconds : <.2f}″"
     
     def __float__(self):
         # 数字表示，输出角度值
@@ -42,38 +42,44 @@ class Angle:
     
     def tan(self):
         return math.tan(self.to_radians())
-    
-
 
 
 def input_params_ui():
+    if 'run_count' not in st.session_state:
+        st.session_state.run_count = 0
+    st.session_state.run_count += 1
     st.title('软齿轮系计算')
     
     controller = CookieController(key='cookies')
     input_params = None
-    if st.button('读取上次参数'):
+    if st.session_state.run_count == 1:
         input_params = controller.get('input_params')
-        
+    INIT_PARAMS = {
+        'k': 1., 'time_mode': 0, 'years': 0.,
+        'p_in': 5., 'n_in': 100., 'n_out': 1., 'phid': 1., 'coeff': 1.,
+        'eta_I': 1., 'eta_II': 1., 'eta_III': 1.,
+        'z1': 24, 'z3': 24, 'beta_I': 0, 'beta_II': 0,
+        'sigh_lim_13': 100., 'sigh_lim_24': 100.,
+        'sigf_e_13': 100., 'sigf_e_24': 100., 'ze': 100.
+    }
     if input_params is None:
-        input_params = {
-            'k': 1., 'time_mode': 0, 'years': 0.,
-            'p_in': 5., 'n_in': 100., 'n_out': 1., 'phid': 1., 'coeff': 1.,
-            'eta_I': 1., 'eta_II': 1., 'eta_III': 1.,
-            'z1': 24, 'z3': 24, 'beta_I': 0, 'beta_II': 0,
-            'sigh_lim_13': 100., 'sigh_lim_24': 100.,
-            'sigf_e_13': 100., 'sigf_e_24': 100., 'ze': 100.
-        }
+        input_params = INIT_PARAMS
+    else:
+        para_keys = INIT_PARAMS.keys()
+        for k in para_keys:
+            if k not in input_params:
+                input_params[k] = INIT_PARAMS[k]
         
     st.header(body='工况参数')
     input_params['k'] = st.number_input('初选工况系数', value=input_params['k'])
     TIME_MODES = ['单班制', '双班制']
     input_params['time_mode'] = TIME_MODES.index(st.selectbox('选择班制：', TIME_MODES, input_params['time_mode']))
     input_params['years'] = st.number_input('工作年数：', value=input_params['years'])
+    input_params['beta_I'] = float(input_params['beta_I'])
+    input_params['beta_II'] = float(input_params['beta_II'])
     
     
     st.header(body='材料参数')
-    input_params['beta_I'] = float(input_params['beta_I'])
-    input_params['beta_II'] = float(input_params['beta_II'])
     input_params['sigh_lim_13'] = st.number_input(r'小齿轮接触极限 $\text{(MPa)}$', value=input_params['sigh_lim_13'])
     input_params['sigf_e_13'] = st.number_input(r'小齿轮抗弯极限 $\text{(MPa)}$', value=input_params['sigf_e_13'])
     input_params['sigh_lim_24'] = st.number_input(r'大齿轮接触极限 $\text{(MPa)}$', value=input_params['sigh_lim_24'])
@@ -84,7 +90,7 @@ def input_params_ui():
     input_params['z1'] = st.number_input('低速级小齿轮齿数', value=input_params['z1'])
     input_params['z3'] = st.number_input('高速级小齿轮齿数', value=input_params['z3'])
     input_params['beta_I'] = st.number_input('高速级螺旋角 β (°)', value=input_params['beta_I'])
-    input_params['beta_I'] = st.number_input('低速级螺旋角 β (°)', value=input_params['beta_II'])
+    input_params['beta_II'] = st.number_input('低速级螺旋角 β (°)', value=input_params['beta_II'])
     
     st.header('传动参数')
     input_params['p_in'] = st.number_input(r'输入功率 $P$ $\text{(kW)}$', value=input_params['p_in'])
@@ -96,9 +102,8 @@ def input_params_ui():
     input_params['phid'] = st.number_input('宽度系数 $Φ_d$', value=input_params['phid'])
     input_params['coeff'] = st.number_input('传动比分配系数', value=input_params['coeff'])
     
-    if st.button('保存参数'):
-        st.write('已保存')
-        controller.set('input_params', input_params)
+    print(input_params)
+    controller.set('input_params', input_params)
     
     input_params['beta_I'] = Angle(input_params['beta_I'])
     input_params['beta_II'] = Angle(input_params['beta_II'])
@@ -115,9 +120,11 @@ def calc_iI_iII(i_total: float, coeff: float) -> tuple[float, float]:
     return iI, iII
 
 
+st.write(r'建议放大 25% 查看该网页')
 input_params = input_params_ui()
 
 
+# ------------------------------------------------------------
 # region 计算传动参数
 INPUT_POWER: float = input_params['p_in']
 INPUT_SPEED: float = input_params['n_in']
@@ -164,27 +171,9 @@ else:
 # endregion 计算传动参数
 
 
-# region 计算斜齿轮区域系数
-ALPHA_N = Angle(20)
-BETA_1: Angle = input_params['beta_I']
-BETA_2: Angle = input_params['beta_II']
-
-def calc_zh(alpha: Angle, beta: Angle):
-    if float(beta) < 8.:
-        return 2.5
-    alpha_t = math.atan(alpha.tan() / beta.tan())
-    beta_b = beta.tan() * alpha_t.cos()
-    zh_rad = math.sqrt(2 * beta_b.cos() / (alpha_t.sin() * alpha_t.cos()))
-    return Angle(zh_rad / math.pi * 180)
-
-ZH_1 = calc_zh(ALPHA_N, BETA_1)
-ZH_2 = calc_zh(ALPHA_N, BETA_2)
-# endregion 计算斜齿轮区域系数
-
-
+# ------------------------------------------------------------
 st.markdown('---')
 st.header('粗算')
-
 
 verify_passed = True
 def fail_verify(reason):
@@ -193,7 +182,12 @@ def fail_verify(reason):
     st.error(reason, icon='🚨')
 
 
+# ------------------------------------------------------------
 # region 计算齿形系数
+BETA_1: Angle = input_params['beta_I']
+BETA_2: Angle = input_params['beta_II']
+print(BETA_1, BETA_2)
+
 def calc_yfa(z, beta) -> float:
     denominator = math.cos(beta) ** 3
     if denominator == 0:
@@ -245,10 +239,17 @@ yf = [
     calc_yf(z3, BETA_2),
     calc_yf(z4, BETA_2)
 ]
+
+st.subheader('齿形系数')
+st.table(pd.DataFrame([yf], columns=[
+    rf'$Y_{{F_{i + 1}}}$' for i in range(4)
+]))
 # endregion 计算齿形系数
 
 
+# ------------------------------------------------------------
 # region 计算许用值
+st.subheader('计算许用接触和弯曲应力')
 ZE: float = input_params['ze']
 SIG_H_LIM_13 = input_params['sigh_lim_13']
 SIG_H_LIM_24 = input_params['sigh_lim_24']
@@ -256,17 +257,17 @@ SIG_F_E_13 = input_params['sigf_e_13']
 SIG_F_E_24 = input_params['sigf_e_24']
 
 S_MIN_SELECTIONS = [
-    '高可考虑（1 / 10,000)',
-    '中可考虑（1 / 1,000)',
-    '一般可考虑（1 / 100)',
-    '低可考虑（1 / 10) 可能在塑性形变前点蚀',
+    '高可靠率（1 / 10,000)',
+    '中可靠率（1 / 1,000)',
+    '一般可靠率（1 / 100)',
+    '低可靠率（1 / 10) 可能在塑性形变前点蚀',
 ]
 S_SEL = S_MIN_SELECTIONS.index(st.selectbox('最小安全系数', S_MIN_SELECTIONS))
 S_MIN_H_SELECTIONS = [1.5, 1.25, 1., .85]
 S_MIN_F_SELECTIONS = [2., 1.6, 1.25, 1.]
 SH_MIN = S_MIN_H_SELECTIONS[S_SEL]
 SF_MIN = S_MIN_F_SELECTIONS[S_SEL]
-st.write('| $S_{H_{min}}$ | $S_{F_{min}}$ |\n| :-: | :-: |\n' + f'| {SF_MIN} | {SH_MIN} |')
+st.table(pd.DataFrame([[SF_MIN, SH_MIN]], columns=[r'$S_{H_{min}}$', r'$S_{F_{min}}$']))
 
 def calc_sigma_h(
     sigh_lim: float, sh_min: float,
@@ -281,39 +282,38 @@ def calc_sigma_h(
 
     Parameters
     ----------
-    sigh_lim (float): 材料接触疲劳极限。
+        sigh_lim (float): 材料接触疲劳极限。
 
-    sh_min (float): 接触疲劳安全系数。
+        sh_min (float): 接触疲劳安全系数。
 
-    N (float): 应力循环次数。
+        N (float): 应力循环次数。
 
-    type (int): 材料类型（曲线类型）。
+        type (int): 材料类型（曲线类型）。
 
-    exp_adjust (float, optional): 经验系数，决定 `N = 10^10` 时的值。
-
+        exp_adjust (float, optional): 经验系数，决定 `N = 10^10` 时的值。
         范围为 0 到 1，对应 0.85 到 1。默认为 0。
 
     Returns
     ----------
-    float: 计算得到的接触疲劳极限 sigma_h。
+        float: 计算得到的接触疲劳极限 sigma_h。
     """
     adjust_val = np.interp(exp_adjust, [0., 1.], [0.85, 1.])
     # 定义每种材料的应力循环次数和寿命系数
     materials = [
         {
-            'N': [0, 6e5, 1e7, 1e9, 1e10],
+            'N': [1e-10, 6e5, 1e7, 1e9, 1e10],
             'ZNT': [1.6, 1.6, 1.3, 1.0, adjust_val]
         },
         {
-            'N': [0, 1e5, 5e7, 1e10],
+            'N': [1e-10, 1e5, 5e7, 1e10],
             'ZNT': [1.6, 1.6, 1.0, adjust_val]
         },
         {
-            'N': [0, 1e5, 2e6, 1e10],
+            'N': [1e-10, 1e5, 2e6, 1e10],
             'ZNT': [1.3, 1.3, 1.0, adjust_val]
         },
         {
-            'N': [0, 1e5, 2e6, 1e10],
+            'N': [1e-10, 1e5, 2e6, 1e10],
             'ZNT': [1.1, 1.1, 1.0, adjust_val]
         }
     ]
@@ -339,38 +339,38 @@ def calc_sigma_f(
 
     Parameters
     ----------
-    sigh_lim (float): 材料接触疲劳极限。
-    
-    sh_min (float): 接触疲劳安全系数。
-    
-    N (float): 应力循环次数。
-    
-    type (int): 材料类型（曲线类型）。
-    
-    exp_adjust (float, optional): 经验系数，决定 N = 10^10 时的值。
-        范围为 0 到 1，对应 0.85 到 1。默认为 0。
+        sigh_lim (float): 材料接触疲劳极限。
+        
+        sh_min (float): 接触疲劳安全系数。
+        
+        N (float): 应力循环次数。
+        
+        type (int): 材料类型（曲线类型）。
+        
+        exp_adjust (float, optional): 经验系数，决定 N = 10^10 时的值。
+            范围为 0 到 1，对应 0.85 到 1。默认为 0。
 
     Returns
     -------
-    float: 计算得到的接触疲劳极限 sigma_h。
+        float: 计算得到的接触疲劳极限 sigma_h。
     """
     # 定义每种材料的应力循环次数和寿命系数
     adjust_val = np.interp(exp_adjust, [0., 1.], [0.85, 1.])
     materials = [
         {
-            'N': [0, 1e4, 3e6, 1e10],
+            'N': [1e-10, 1e4, 3e6, 1e10],
             'YNT': [2.5, 2.5, 1.0, adjust_val]
         },
         {
-            'N': [0, 1e3, 3e6, 1e10],
+            'N': [1e-10, 1e3, 3e6, 1e10],
             'YNT': [2.5, 2.5, 1.0, adjust_val]
         },
         {
-            'N': [0, 1e3, 3e6, 1e10],
+            'N': [1e-10, 1e3, 3e6, 1e10],
             'YNT': [1.6, 1.6, 1.0, adjust_val]
         },
         {
-            'N': [0, 1e3, 3e6, 1e10],
+            'N': [1e-10, 1e3, 3e6, 1e10],
             'YNT': [1.1, 1.1, 1.0, adjust_val]
         }
     ]
@@ -414,20 +414,72 @@ st.subheader('接触疲劳强度计算')
 st.write('寿命系数计算方法参考 GB/T 6366-2019 中的表格。')
 st.table(pd.DataFrame(SIGH, range(1, 5), [r'应力循环', r'$Z_N$', r'$\sigma_H$']))
 st.table(pd.DataFrame(SIGF, range(1, 5), [r'应力循环', r'$Y_N$', r'$\sigma_F$']))
+
+SIGH = [SIGH[i][2] for i in range(4)]
+SIGH = [min(SIGH[0], SIGH[1]), min(SIGH[2], SIGH[3])]
+yf_div_sigf = []
 # endregion 计算许用值
 
 
+# ------------------------------------------------------------
+# region 计算最小值
 k: float = input_params['k']
-    
+ALPHA_N = Angle(20)
+
 def calc_dmin(
-    zh  : float, # 区域系数，普通圆柱齿轮 = 2.5
-    t   : float, # 小齿轮扭矩
-    k_  : float, # 载荷系数
-    i   : float, # 传动比
-    sigh: float, # 接触疲劳强度
-    beta: Angle  # 斜齿轮螺旋角
-    ):
-    return (2 * k_ * t * (i + 1) / i * beta.cos() * (zh * ze / sigh) ** 2)**(1 / 3)
+    t_: float, u_: float,
+    k_: float, sigh: float,
+    beta: Angle
+    ) -> float:
+    """
+    计算齿轮的最小直径 d_min。
+ 
+    Parameters
+    ----------
+        t_ (float): 小齿轮扭矩，单位为牛米 (Nm)。
+
+        k_ (float): 载荷系数，考虑不同工况下的载荷变化。
+
+        i (float): 传动比，即大齿轮与小齿轮的齿数比。
+
+        sigh (float): 接触疲劳强度，单位为兆帕 (MPa)。
+
+        beta (Angle): 斜齿轮螺旋角，表示齿轮齿的倾斜角度。
+ 
+    Returns
+    -------
+        float: 计算得到的最小直径 d_min，单位为毫米 (mm)。
     
+    Notes
+    -------
+        - 该计算基于一般的机械设计公式，具体应用中可能需要根据行业标准进行调整。
+        - 确保所有输入单位一致，以便获得正确的结果。
+    """
+    zh = 2.5 # 计算区域系数。例如，普通圆柱齿轮通常为 2.5。
+    if float(beta) >= 7.:
+        # 认为只有 β >= 7° 才算斜齿轮
+        alpha_t = math.atan(ALPHA_N.tan() / beta.tan())
+        beta_b = math.atan(beta.tan() * math.cos(alpha_t))
+        alpha_t_1 = alpha_t # 没有变位
+        zh = math.sqrt(2 * beta_b * math.cos(alpha_t_1) / (
+            math.cos(alpha_t) ** 2 * math.sin(alpha_t_1)
+        )) # 计算区域系数
+    t_ = 1e3 * t_ # N·mm
+    print(k_, t_, u_, beta, zh, ZE, sigh)
+    return (2 * k_ * t_ * (u_ + 1) / u_ * beta.cos() * (zh * ZE / sigh) ** 2)**(1 / 3)
 
 st.subheader('计算直径')
+D_MIN = [
+    calc_dmin([T_I, T_II, T_II, T_III][i],
+              [i1, i2][i // 2],
+              k, SIGH[i // 2],
+              [BETA_1, BETA_2][i // 2]
+              ) for i in range(4)
+]
+diameters = [D_MIN[0], D_MIN[0] * i1, D_MIN[2], D_MIN[2] * 2]
+st.table(pd.DataFrame([D_MIN, diameters], index=[
+    '原始计算值', '传动比计算的大轮'
+    ], columns=[
+    rf'$d_{{min_{i + 1}}}$' for i in range(4)
+]))
+# endregion 计算最小值
