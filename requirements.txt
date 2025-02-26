@@ -3,3 +3,4 @@ streamlit_cookies_controller
 scipy
 matplotlib
 pandas
+xlsxwriter
