@@ -1,0 +1,42 @@
+def calc_yfa(z, beta):
+    denominator = math.cos(beta) ** 3
+    if denominator == 0:
+        return 0.0  # 防止分母为零的情况，具体处理需根据实际需求调整
+    zv = z / denominator
+    if zv < 35:
+        term = (zv - 16) / (math.cos(beta) ** 3)
+        return (-0.0000570752776635208 * (term ** 3) +
+                0.00307677616500968 * (term ** 2) -
+                0.0688841305752419 * term +
+                3.03422577422526)
+    elif zv < 110:
+        term = (zv / 10 - 2) / (math.cos(beta) ** 3)
+        return (-0.00141414141414042 * (term ** 3) +
+                0.0267099567099223 * (term ** 2) -
+                0.18568542568536 * term +
+                2.6785714285711)
+    elif zv < 160:
+        return 2.14
+    elif zv < 210:
+        return 2.12
+    else:
+        return 2.1
+
+def calc_ysa(z, beta):
+    if z < 35:
+        term = (z - 16) / (math.cos(beta) ** 3)
+        return (0.0000291375291376905 * (term ** 3) -
+                0.00079295704295923 * (term ** 2) +
+                0.0139880952381617 * term +
+                1.50570429570396)
+    elif z < 130:
+        term = (z / 10 - 2) / (math.cos(beta) ** 3)
+        return (-0.0027083333 * (term ** 2) +
+                0.0474107143 * term +
+                1.5825892857)
+    elif z < 160:
+        return 1.83
+    elif z < 210:
+        return 1.865
+    else:
+        return 1.9
