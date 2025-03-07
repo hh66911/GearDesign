@@ -1,10 +1,10 @@
 import math
+import io
 import streamlit as st
 from streamlit_cookies_controller import CookieController
 import scipy.optimize as opt
 import numpy as np
 import pandas as pd
-import  io
 
 
 class Angle:
@@ -24,7 +24,7 @@ class Angle:
         min = int(minutes)
         seconds = (minutes - min) * 60
         return f"{deg}°{min}'{seconds : <.2f}″"
-    
+
     def __float__(self):
         # 数字表示，输出角度值
         return float(self._degrees)
@@ -40,7 +40,7 @@ class Angle:
     def cos(self):
         # 计算余弦值
         return math.cos(self.to_radians())
-    
+
     def tan(self):
         return math.tan(self.to_radians())
 
@@ -50,11 +50,9 @@ def input_params_ui():
         st.session_state.run_count = 0
     st.session_state.run_count += 1
     st.title('软齿轮系计算')
-    
+
     controller = CookieController(key='cookies')
-    input_params = None
-    if st.session_state.run_count == 1:
-        input_params = controller.get('input_params')
+    input_params = controller.get('input_params')
     INIT_PARAMS = {
         'k': 1., 'time_mode': 0, 'years': 0.,
         'p_in': 5., 'n_in': 100., 'n_out': 1., 'phid': 1., 'coeff': 1.,
@@ -70,46 +68,68 @@ def input_params_ui():
         for k in para_keys:
             if k not in input_params:
                 input_params[k] = INIT_PARAMS[k]
-    
+
+    for k in input_params:
+        if k not in ('z1', 'z3', 'time_mode'):
+            input_params[k] = float(input_params[k])
+
     with st.container(border=True):
         st.subheader(body='工况参数')
         input_params['k'] = st.number_input('初选工况系数', value=input_params['k'])
         TIME_MODES = ['单班制', '双班制']
-        input_params['time_mode'] = TIME_MODES.index(st.selectbox('选择班制：', TIME_MODES, input_params['time_mode']))
-        input_params['years'] = st.number_input('工作年数：', value=input_params['years'])
-        input_params['beta_I'] = float(input_params['beta_I'])
-        input_params['beta_II'] = float(input_params['beta_II'])
-        
-        
+        input_params['time_mode'] = TIME_MODES.index(
+            st.selectbox('选择班制：', TIME_MODES, input_params['time_mode']))
+        input_params['years'] = st.number_input(
+            '工作年数：', value=input_params['years'])
+        input_params['beta_I'] = input_params['beta_I']
+        input_params['beta_II'] = input_params['beta_II']
+
         st.subheader(body='材料参数')
-        input_params['sigh_lim_13'] = st.number_input(r'小齿轮接触极限 $\text{(MPa)}$', value=input_params['sigh_lim_13'])
-        input_params['sigf_e_13'] = st.number_input(r'小齿轮抗弯极限 $\text{(MPa)}$', value=input_params['sigf_e_13'])
-        input_params['sigh_lim_24'] = st.number_input(r'大齿轮接触极限 $\text{(MPa)}$', value=input_params['sigh_lim_24'])
-        input_params['sigf_e_24'] = st.number_input(r'大齿轮抗弯极限 $\text{(MPa)}$', value=input_params['sigf_e_24'])
-        input_params['ze'] = st.number_input(r'$Z_e$ ($\sqrt{MPa}$))', value=input_params['ze'])
-        
+        input_params['sigh_lim_13'] = st.number_input(
+            r'小齿轮接触极限 $\text{(MPa)}$', value=input_params['sigh_lim_13'])
+        input_params['sigf_e_13'] = st.number_input(
+            r'小齿轮抗弯极限 $\text{(MPa)}$', value=input_params['sigf_e_13'])
+        input_params['sigh_lim_24'] = st.number_input(
+            r'大齿轮接触极限 $\text{(MPa)}$', value=input_params['sigh_lim_24'])
+        input_params['sigf_e_24'] = st.number_input(
+            r'大齿轮抗弯极限 $\text{(MPa)}$', value=input_params['sigf_e_24'])
+        input_params['ze'] = st.number_input(
+            r'$Z_e$ ($\sqrt{MPa}$))', value=input_params['ze'])
+
         st.subheader('尺寸参数')
-        input_params['z1'] = st.number_input('低速级小齿轮齿数', value=input_params['z1'])
-        input_params['z3'] = st.number_input('高速级小齿轮齿数', value=input_params['z3'])
-        input_params['beta_I'] = st.number_input('高速级螺旋角 β (°)', value=input_params['beta_I'])
-        input_params['beta_II'] = st.number_input('低速级螺旋角 β (°)', value=input_params['beta_II'])
-        
+        input_params['z1'] = st.number_input(
+            '低速级小齿轮齿数', value=input_params['z1'])
+        input_params['z3'] = st.number_input(
+            '高速级小齿轮齿数', value=input_params['z3'])
+        input_params['beta_I'] = st.number_input(
+            '高速级螺旋角 β (°)', value=input_params['beta_I'])
+        input_params['beta_II'] = st.number_input(
+            '低速级螺旋角 β (°)', value=input_params['beta_II'])
+
         st.subheader('传动参数')
-        input_params['p_in'] = st.number_input(r'输入功率 $P$ $\text{(kW)}$', value=input_params['p_in'])
-        input_params['n_in'] = st.number_input(r'输入转速 $n$ $\text{(rpm)}$', value=input_params['n_in'])
-        input_params['n_out'] = st.number_input(r'目标转速 $n_{out}$ $\text{(rpm)}$', value=input_params['n_out'])
-        input_params['eta_I'] = st.number_input(r'$\text{I}$ 轴效率', value=input_params['eta_I'])
-        input_params['eta_II'] = st.number_input(r'$\text{II}$ 轴效率', value=input_params['eta_II'])
-        input_params['eta_III'] = st.number_input(r'$\text{III}$ 轴效率', value=input_params['eta_III'])
-        input_params['phid'] = st.number_input('宽度系数 $Φ_d$', value=input_params['phid'])
-        input_params['coeff'] = st.number_input('传动比分配系数', value=input_params['coeff'])
-    
+        input_params['p_in'] = st.number_input(
+            r'输入功率 $P$ $\text{(kW)}$', value=input_params['p_in'])
+        input_params['n_in'] = st.number_input(
+            r'输入转速 $n$ $\text{(rpm)}$', value=input_params['n_in'])
+        input_params['n_out'] = st.number_input(
+            r'目标转速 $n_{out}$ $\text{(rpm)}$', value=input_params['n_out'])
+        input_params['eta_I'] = st.number_input(
+            r'$\text{I}$ 轴效率', value=input_params['eta_I'])
+        input_params['eta_II'] = st.number_input(
+            r'$\text{II}$ 轴效率', value=input_params['eta_II'])
+        input_params['eta_III'] = st.number_input(
+            r'$\text{III}$ 轴效率', value=input_params['eta_III'])
+        input_params['phid'] = st.number_input(
+            '宽度系数 $Φ_d$', value=input_params['phid'])
+        input_params['coeff'] = st.number_input(
+            '传动比分配系数', value=input_params['coeff'])
+
     # print(input_params)
     controller.set('input_params', input_params)
-    
+
     input_params['beta_I'] = Angle(input_params['beta_I'])
     input_params['beta_II'] = Angle(input_params['beta_II'])
-    
+
     return input_params
 
 
@@ -149,14 +169,19 @@ z3: int = input_params['z3']
 z2 = round(z1 * i1)
 z4 = round(z3 * i2)
 
+
 def calc_i1_i2():
     global i1, i2
     i1 = z2 / z1
     i2 = z4 / z3
+
+
 calc_i1_i2()
 st.write(f'粗算高速级转动比 {i1: .2f}，低速级传动比 {i2: .2f}')
 
 # 计算各级转速
+
+
 def calc_Ns(show=False):
     global N_I, N_II, N_III
     N_I = INPUT_SPEED
@@ -171,8 +196,12 @@ def calc_Ns(show=False):
             st.write(f'转速误差：{speed_re: .4f}%')
         else:
             st.write(f'转速误差：{speed_re: .2f}%')
+
+
 calc_Ns(True)
 # 计算各级扭矩
+
+
 def calc_Ts(show=False):
     global T_I, T_II, T_III
     T_I = P_I * 30 / (math.pi * N_I) * 1e3
@@ -180,6 +209,8 @@ def calc_Ts(show=False):
     T_III = P_III * 30 / (math.pi * N_III) * 1e3
     if show:
         st.write(f'扭矩链（N·m）： {T_I: .2f} -> {T_II: .2f} -> {T_III: .2f}')
+
+
 calc_Ts(True)
 # endregion 计算传动参数
 
@@ -193,6 +224,7 @@ st.header('粗算')
 BETA_1: Angle = input_params['beta_I']
 BETA_2: Angle = input_params['beta_II']
 # print(BETA_1, BETA_2)
+
 
 def calc_yfa(z: int, beta: Angle) -> float:
     denominator = beta.cos() ** 3
@@ -217,6 +249,7 @@ def calc_yfa(z: int, beta: Angle) -> float:
         return 2.12
     return 2.1
 
+
 def calc_ysa(z: int, beta: Angle) -> float:
     if z < 35:
         term = (z - 16) / (beta.cos() ** 3)
@@ -234,12 +267,14 @@ def calc_ysa(z: int, beta: Angle) -> float:
     if z < 210:
         return 1.865
     return 1.9
-    
+
+
 def calc_yf(z: int, beta: Angle):
     '''
     计算齿形系数 YFa。该方法基于方法 B。精度较低，仅供初步计算使用。
     '''
     return calc_yfa(z, beta) * calc_ysa(z, beta)
+
 
 def calc_all_yfs_and_show():
     global YF
@@ -254,6 +289,7 @@ def calc_all_yfs_and_show():
     st.table(pd.DataFrame([YF], columns=[
         rf'$Y_{{F_{i + 1}}}$' for i in range(4)
     ]))
+
 
 st.subheader('齿形系数')
 calc_all_yfs_and_show()
@@ -280,7 +316,8 @@ S_MIN_H_SELECTIONS = [1.5, 1.25, 1., .85]
 S_MIN_F_SELECTIONS = [2., 1.6, 1.25, 1.]
 SH_MIN = S_MIN_H_SELECTIONS[S_SEL]
 SF_MIN = S_MIN_F_SELECTIONS[S_SEL]
-st.table(pd.DataFrame([[SF_MIN, SH_MIN]], columns=[r'$S_{H_{min}}$', r'$S_{F_{min}}$']))
+st.table(pd.DataFrame([[SF_MIN, SH_MIN]], columns=[
+         r'$S_{H_{min}}$', r'$S_{F_{min}}$']))
 
 MATERIAL_TYPES = [
     '允许一定点蚀的结构钢；调质钢；球墨铸铁（珠光体、贝氏体）；珠光体和可锻铸铁；渗碳淬火的渗碳钢',
@@ -294,9 +331,10 @@ time_per_day = [8, 16][input_params['time_mode']]
 n_years = input_params['years']
 time_hours = n_years * 365 * time_per_day
 
+
 def calc_sigma_h(
     sigh_lim: float, sh_min: float,
-    N: float, type: int, exp_adjust = 0.
+    N: float, type: int, exp_adjust=0.
 ):
     """
     计算材料的接触疲劳许用值 sigma_h。
@@ -350,9 +388,10 @@ def calc_sigma_h(
     ZNT = np.interp(log_N, log_N_values, ZNT_values).item()
     return f'{N: .2e}', ZNT, sigh_lim / sh_min * ZNT
 
+
 def calc_sigma_f(
     sigf_lim: float, sf_min: float,
-    N: float, type: int, exp_adjust = 0.
+    N: float, type: int, exp_adjust=0.
 ):
     """
     计算材料的接触疲劳许用值 `sigma_h`。
@@ -365,13 +404,13 @@ def calc_sigma_f(
     Parameters
     ----------
         sigh_lim (float): 材料接触疲劳极限。
-        
+
         sh_min (float): 接触疲劳安全系数。
-        
+
         N (float): 应力循环次数。
-        
+
         type (int): 材料类型（曲线类型）。
-        
+
         exp_adjust (float, optional): 经验系数，决定 N = 10^10 时的值。
             范围为 0 到 1，对应 0.85 到 1。默认为 0。
 
@@ -406,6 +445,7 @@ def calc_sigma_f(
     log_N_values = np.log10(N_values)
     YNT = np.interp(log_N, log_N_values, YNT_values).item()
     return f'{N: .2e}', YNT, sigf_lim / sf_min * YNT
+
 
 nloop_1 = 1 * 60 * time_hours * N_I
 nloop_2 = 1 * 60 * time_hours * N_II
@@ -444,14 +484,15 @@ st.table(pd.DataFrame([[
 k: float = input_params['k']
 ALPHA_N = Angle(20)
 
+
 def calc_dmin(
     t_: float, u_: float,
     k_: float, sigh: float,
     beta: Angle
-    ) -> float:
+) -> float:
     """
     计算齿轮的最小直径 d_min。
- 
+
     Parameters
     ----------
         t_ (float): 小齿轮扭矩，单位为牛米 (Nm)。
@@ -463,40 +504,41 @@ def calc_dmin(
         sigh (float): 接触疲劳强度，单位为兆帕 (MPa)。
 
         beta (Angle): 斜齿轮螺旋角，表示齿轮齿的倾斜角度。
- 
+
     Returns
     -------
         float: 计算得到的最小直径 d_min，单位为毫米 (mm)。
-    
+
     Notes
     -------
         - 该计算基于方法 B。
         - 确保所有输入单位一致，以便获得正确的结果。
     """
-    zh = 2.5 # 计算区域系数。例如，普通圆柱齿轮通常为 2.5。
+    zh = 2.5  # 计算区域系数。例如，普通圆柱齿轮通常为 2.5。
     if float(beta) >= 7.:
         # 认为只有 β >= 7° 才算斜齿轮
         alpha_t = math.atan(ALPHA_N.tan() / beta.cos())
         beta_b = math.atan(beta.tan() * math.cos(alpha_t))
-        alpha_t_1 = alpha_t # 没有变位
+        alpha_t_1 = alpha_t  # 没有变位
         zh = math.sqrt(2 * math.cos(beta_b) * math.cos(alpha_t_1) / (
             math.cos(alpha_t) ** 2 * math.sin(alpha_t_1)
-        )) # 计算区域系数
-    t_ = 1e3 * t_ # N·mm
+        ))  # 计算区域系数
+    t_ = 1e3 * t_  # N·mm
     # print(k_, t_, u_, beta, zh, ZE, sigh)
     return (
         2 * k_ * t_ / PHI_D *
         (u_ + 1) / u_ * beta.cos() *
         (zh * ZE / sigh) ** 2
     ) ** (1 / 3)
-    
+
+
 def calc_mmin_tol(
     t_: float, z_: float, k_: float,
     yf_div_sigf: float, beta: Angle
-    ) -> float:
+) -> float:
     """
     计算齿轮的最小模数 m_min。
-    
+
     Parameters
     ----------
         t_ (float): 小齿轮扭矩，单位为牛米 (Nm)。
@@ -508,19 +550,20 @@ def calc_mmin_tol(
         yf_div_sigf (float): 齿形系数与应力系数的比值。
 
         beta (Angle): 斜齿轮螺旋角，表示齿轮齿的倾斜角度。
-        
+
     Returns
     -------
         float: 计算得到的最小模数 m_min。
-        
+
     Notes
     -------
         - 该计算基于方法 B。
         - 确保所有输入单位一致，以便获得正确
     """
-    t_ = 1e3 * t_ # N·mm
-    zv = z_ / beta.cos() # 修正齿数
+    t_ = 1e3 * t_  # N·mm
+    zv = z_ / beta.cos()  # 修正齿数
     return (2 * k_ * t_ / PHI_D / zv**2 * yf_div_sigf) ** (1 / 3)
+
 
 st.subheader('计算最小直径')
 D_MIN = [
@@ -533,7 +576,7 @@ D_MIN = [
 diameters = [D_MIN[0], D_MIN[0] * i1, D_MIN[2], D_MIN[2] * 2]
 st.table(pd.DataFrame([D_MIN, diameters], index=[
     '原始计算值', '传动比计算的大轮'
-    ], columns=[
+], columns=[
     rf'$d_{{min_{i + 1}}}$' for i in range(4)
 ]))
 # endregion 计算最小值
@@ -548,17 +591,21 @@ st.header('精算')
 st.subheader('选取模数')
 M_SERIES = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6]
 zs = [z1, z2, z3, z4]
-MS_RAW = [[BETA_1.cos(), BETA_2.cos()][i // 2] * di / z 
+MS_RAW = [[BETA_1.cos(), BETA_2.cos()][i // 2] * di / z
           for i, (di, z) in enumerate(zip(diameters, zs))]
 # 找到最接近的模数
+
+
 def select_m_value(mi):
     return min(M_SERIES, key=lambda x: x - mi if x > mi else math.inf)
+
+
 ms = [select_m_value(mi) for mi in MS_RAW]
 ms[0] = ms[1] = max(ms[0], ms[1])
 ms[2] = ms[3] = max(ms[2], ms[3])
 st.table(pd.DataFrame([MS_RAW, ms], index=[
     '$z, d$ 计算 $m$', '取用'
-    ], columns=[
+], columns=[
     rf'$m_{i + 1}$' for i in range(4)
 ]))
 st.write(r'计算最小模数（注意：为了方便，计算使用 $Y_\beta = 1$ 作为安全冗余）')
@@ -575,19 +622,25 @@ M_MIN = [
 ]
 st.table(pd.DataFrame([M_MIN, M_PASSED], index=[
     '计算最小值', '是否通过'
-    ], columns=[
+], columns=[
     rf'$m_{{min_{i + 1}}}$' for i in range(4)
 ]))
-ms[0] = ms[1] = st.select_slider('精调高速级模数', M_SERIES[M_SERIES.index(ms[0]):], ms[0])
-ms[2] = ms[3] = st.select_slider('精调低速级模数', M_SERIES[M_SERIES.index(ms[2]):], ms[2])
+ms[0] = ms[1] = st.select_slider(
+    '精调高速级模数', M_SERIES[M_SERIES.index(ms[0]):], ms[0])
+ms[2] = ms[3] = st.select_slider(
+    '精调低速级模数', M_SERIES[M_SERIES.index(ms[2]):], ms[2])
 
 
 st.subheader('选取中心距')
+
+
 def calc_ds(zs, ms):
     ds = []
     for i in range(4):
         ds.append(zs[i] * ms[i] / [BETA_1, BETA_2][i // 2].cos())
     return ds
+
+
 diameters = calc_ds(zs, ms)
 D_STR = [f'{d: .2f}' for d in diameters]
 st.table(pd.DataFrame([D_STR], columns=[
@@ -629,8 +682,8 @@ if float(BETA_2) < 8.:
     z3 += z34_bias
     z4 -= z34_bias
 else:
-    z3 = st.select_slider('$Z_1$', range(z3 - 10, z3 + 12), value=z3)
-    z4 = st.select_slider('$Z_2$', range(z4 - 10, z4 + 12), value=z4)
+    z3 = st.select_slider('$Z_3$', range(z3 - 10, z3 + 12), value=z3)
+    z4 = st.select_slider('$Z_4$', range(z4 - 10, z4 + 12), value=z4)
     zs[2], zs[3] = z3, z4
     diameters = calc_ds(zs, ms)
     a2_new = (diameters[2] + diameters[3]) / 2
@@ -646,7 +699,7 @@ ZS_STR = [str(zi) for zi in zs]
 D_STR = [f'{d: .2f}' for d in diameters]
 st.table(pd.DataFrame([ZS_STR, D_STR], index=[
     '齿数', '直径'
-    ], columns=[
+], columns=[
     f'齿轮 {i + 1}' for i in range(4)
 ]))
 st.write(r'提示：如果发现 $d_2$ $d_4$ 差的比较大，调最上面的传动比分配系数。系数越大，$\frac{d_2}{d_4}$ 越大')
@@ -717,7 +770,7 @@ D_PASSED = ['√' if diameters[i] > D_MIN[i] else '×' for i in range(4)]
 D_MIN = [f'{di: .2f}' for di in D_MIN]
 st.table(pd.DataFrame([D_STR, D_MIN, D_PASSED], index=[
     '当前值', '计算最小值', '是否通过'
-    ], columns=[
+], columns=[
     rf'$d_{{min_{i + 1}}}$' for i in range(4)
 ]))
 M_MIN = [
@@ -729,11 +782,11 @@ M_MIN = [
 ]
 M_PASSED = ['√' if ms[i] > M_MIN[i] else '×' for i in range(4)]
 M_MIN = [f'{mi: .2f}' for mi in M_MIN
-]
+         ]
 M_STR = [f'{mi: .2f}' for mi in ms]
 st.table(pd.DataFrame([M_STR, M_MIN, M_PASSED], index=[
     '当前值', '计算最小值', '是否通过'
-    ], columns=[
+], columns=[
     rf'$m_{{min_{i + 1}}}$' for i in range(4)
 ]))
 # endregion 计算载荷系数
@@ -742,7 +795,7 @@ st.table(pd.DataFrame([M_STR, M_MIN, M_PASSED], index=[
 # ------------------------------------------------------------
 # region 计算所有尺寸
 # 上文定义了 Zs, diameters, ms
-def calc_gear(m_n, d1, d2, beta):
+def calc_gear(m_n, d1, d2, beta, z1, z2, nin, tin):
     def try_int_parse(x):
         return str(int(x)) if x == int(x) else f'{x: .3f}'
     ha_star, c_star = 1, 0.25
@@ -756,6 +809,8 @@ def calc_gear(m_n, d1, d2, beta):
     c = try_int_parse(c_star * m_n)
     # 节圆直径（标准安装）
     d_prime = try_int_parse(min(d1, d2))
+    b2 = try_int_parse(d_prime * PHI_D)
+    b1 = try_int_parse(b2 + 6)
     # 传动比
     i = f'{d2 / d1: .3f}'
     # 中心距
@@ -768,10 +823,11 @@ def calc_gear(m_n, d1, d2, beta):
     # 齿根圆直径
     df = d - 2 * (int(hf) if hf == int(hf) else hf)
     df = try_int_parse(df)
+    force = try_int_parse(tin / (d / 2))
     gear1 = [
         str(m_n), '20', str(beta), try_int_parse(d),
         try_int_parse(hf), try_int_parse(ha), try_int_parse(h),
-        da, df, c, a, d_prime, i
+        da, df, c, a, d_prime, i, b1, force, str(z1), try_int_parse(nin)
     ]
     d = d2
     # 齿顶圆直径
@@ -780,26 +836,33 @@ def calc_gear(m_n, d1, d2, beta):
     # 齿根圆直径
     df = d - 2 * (int(hf) if hf == int(hf) else hf)
     df = try_int_parse(df)
-    # gear2 = [
-    #     (m_n), '20', (beta), d,
-    #     (hf), (ha), (h),
-    #     da, df, c, a, d_prime, i
-    # ]
+    force = try_int_parse(tin / (d / 2))
+    nin = try_int_parse(nin / i)
     gear2 = [
         str(m_n), '20', str(beta), try_int_parse(d),
         try_int_parse(hf), try_int_parse(ha), try_int_parse(h),
-        da, df, c, a, d_prime, i
+        da, df, c, a, d_prime, i, b2, force, str(z2), nin
     ]
     return gear1, gear2
-small_gear, big_gear = calc_gear(ms[0], diameters[0], diameters[1], BETA_1)
+
+
+small_gear, big_gear = calc_gear(
+    ms[0], diameters[0],
+    diameters[1], BETA_1,
+    z1, z2, N_I, T_I)
 gears = [small_gear, big_gear]
-small_gear, big_gear = calc_gear(ms[2], diameters[2], diameters[3], BETA_2)
+small_gear, big_gear = calc_gear(
+    ms[2], diameters[2],
+    diameters[3], BETA_2,
+    z2, z3, N_II, T_II)
 gears = [*gears, small_gear, big_gear]
 index_names = [
     "模数 (mm)", "法向压力角 (°)", "螺旋角 (度分秒)",
     "分度圆直径 (mm)", "齿根高 (mm)", "齿顶高 (mm)",
     "全齿高 (mm)", "齿顶圆直径 (mm)", "齿根圆直径 (mm)",
-    "顶隙 (mm)", "中心距 (mm)", "节圆直径 (mm)", "传动比"
+    "顶隙 (mm)", "中心距 (mm)", "节圆直径 (mm)",
+    "传动比", "齿宽 (mm)", "齿数", "转速 (rpm)",
+    "切向力 (N)", '径向力 (N)', '轴向力 (N)',
 ]
 gear_names = ['高速级小齿轮', '高速级大齿轮', '低速级小齿轮', '低速级大齿轮']
 gears = list(zip(*gears))
