@@ -7,7 +7,9 @@ import numpy as np
 import pandas as pd
 
 from modeling import (
-    Angle, GearDraft, CalcType, pack_table
+    Angle, GearDraft,
+    CalcType, MaterialType,
+    pack_table
 )
 
 
@@ -129,6 +131,10 @@ n_years = input_params['years']
 time_hours = n_years * 365 * time_per_day
 
 gears = GearDraft.create_gears(time_hours, z1, z1 * i1, z3, z3 * i2)
+GearDraft.set_val(
+    gears, 'phid',
+    PHI_D, PHI_D, PHI_D, PHI_D
+)
 
 ETA_I: float = input_params['eta_I']
 ETA_II: float = input_params['eta_II']
@@ -169,10 +175,6 @@ GearDraft.set_val(
     BETA_1, BETA_1, BETA_2, BETA_2
 )
 
-def show_form_factors(yf: list[float]):
-    st.table(pd.DataFrame([yf], columns=[
-        rf'$Y_{{F_{i + 1}}}$' for i in range(4)
-    ]))
 
 st.subheader('齿形系数')
 form_factors = GearDraft.batch_calc(gears, CalcType.FORM_FACTOR)
@@ -191,14 +193,15 @@ SIG_F_E_13 = input_params['sigf_e_13']
 SIG_F_E_24 = input_params['sigf_e_24']
 
 GearDraft.set_val(
-    gears, 'contact',
-    SIG_H_LIM_13, SIG_H_LIM_24,
-    SIG_H_LIM_24, SIG_H_LIM_13
+    gears, 'stress_lim',
+    *[{'contact': c, 'bending': b} for c, b in zip(
+        [SIG_H_LIM_13, SIG_H_LIM_24, SIG_H_LIM_13, SIG_H_LIM_24],
+        [SIG_F_E_13, SIG_F_E_24, SIG_F_E_13, SIG_F_E_24]
+    )]
 )
 GearDraft.set_val(
-    gears, 'bending',
-    SIG_F_E_13, SIG_F_E_24,
-    SIG_F_E_24, SIG_F_E_13
+    gears, 'z_elastic',
+    ZE, ZE, ZE, ZE
 )
 
 S_MIN_SELECTIONS = [
@@ -212,261 +215,35 @@ S_MIN_H_SELECTIONS = [1.5, 1.25, 1., .85]
 S_MIN_F_SELECTIONS = [2., 1.6, 1.25, 1.]
 SH_MIN = S_MIN_H_SELECTIONS[S_SEL]
 SF_MIN = S_MIN_F_SELECTIONS[S_SEL]
-st.table(pd.DataFrame([[SF_MIN, SH_MIN]], columns=[
-         r'$S_{H_{min}}$', r'$S_{F_{min}}$']))
+GearDraft.set_val(
+    gears, 'safe_factor',
+    *([{'contact': SH_MIN, 'bending': SF_MIN}] * 4))
+st.markdown(
+    '| $S_{H_{min}}$ | $S_{F_{min}}$ |\n| :-: | :-: |\n' +
+        f'| {SH_MIN} | {SF_MIN} |')
 
-MATERIAL_TYPES = [
-    '允许一定点蚀的结构钢；调质钢；球墨铸铁（珠光体、贝氏体）；珠光体和可锻铸铁；渗碳淬火的渗碳钢',
-    '结构钢；调质钢；渗碳淬火钢；火焰、感应淬火；球墨铸铁；珠光体、可锻铁',
-    '灰铸铁；球墨铸铁（铁素体）；渗氮钢、调质钢、渗碳钢',
-    '碳氮共渗钢、渗碳钢'
-]
-ma_type_13 = MATERIAL_TYPES.index(st.selectbox('选择你的小齿轮材料类型：', MATERIAL_TYPES))
-ma_type_24 = MATERIAL_TYPES.index(st.selectbox('选择你的大齿轮材料类型：', MATERIAL_TYPES))
-
-
-def calc_sigma_h(
-    sigh_lim: float, sh_min: float,
-    N: float, type: int, exp_adjust=0.
-):
-    """
-    计算材料的接触疲劳许用值 sigma_h。
-    计算参考 GB/T 6366-2-2019 第 11 章节。
-    对于N > 10^10：ZNT的较小值可用于点蚀出现最少的严格工况中；
-    0.85和1.0之间的值可用于常规传动装置；
-    处于最佳的润滑状态、材料与加工制造下可选用1.0作为经验值。
-
-    Parameters
-    ----------
-        sigh_lim (float): 材料接触疲劳极限。
-
-        sh_min (float): 接触疲劳安全系数。
-
-        N (float): 应力循环次数。
-
-        type (int): 材料类型（曲线类型）。
-
-        exp_adjust (float, optional): 经验系数，决定 `N = 10^10` 时的值。
-        范围为 0 到 1，对应 0.85 到 1。默认为 0。
-
-    Returns
-    ----------
-        float: 计算得到的接触疲劳极限 sigma_h。
-    """
-    adjust_val = np.interp(exp_adjust, [0., 1.], [0.85, 1.])
-    # 定义每种材料的应力循环次数和寿命系数
-    materials = [
-        {
-            'N': [1e-10, 6e5, 1e7, 1e9, 1e10],
-            'ZNT': [1.6, 1.6, 1.3, 1.0, adjust_val]
-        },
-        {
-            'N': [1e-10, 1e5, 5e7, 1e10],
-            'ZNT': [1.6, 1.6, 1.0, adjust_val]
-        },
-        {
-            'N': [1e-10, 1e5, 2e6, 1e10],
-            'ZNT': [1.3, 1.3, 1.0, adjust_val]
-        },
-        {
-            'N': [1e-10, 1e5, 2e6, 1e10],
-            'ZNT': [1.1, 1.1, 1.0, adjust_val]
-        }
-    ]
-    log_N = np.log10(N)
-    # 获取该材料的载荷循环次数和寿命系数
-    N_values = materials[type]['N']
-    ZNT_values = materials[type]['ZNT']
-    log_N_values = np.log10(N_values)
-    ZNT = np.interp(log_N, log_N_values, ZNT_values).item()
-    return f'{N: .2e}', ZNT, sigh_lim / sh_min * ZNT
-
-
-def calc_sigma_f(
-    sigf_lim: float, sf_min: float,
-    N: float, type: int, exp_adjust=0.
-):
-    """
-    计算材料的接触疲劳许用值 `sigma_h`。
-    计算参考 GB/T 6366-3-2019 第 12 章节。
-    在应力循环次数 `NL >= 10^10` 时，寿命系数 `YNT` 的取值范围为 0.85 到 1.0 。
-    其中，较低的 `YNT` 值适用于仅有微小齿根裂纹的苛刻工况。
-    在一般情况下，对于齿轮传动， `YNT` 的取值可以在 0.85 到 1.0 之间选择。
-    当满足最佳的润滑、材料、制造和经验条件时， `YNT` 可以取1.0。
-
-    Parameters
-    ----------
-        sigh_lim (float): 材料接触疲劳极限。
-
-        sh_min (float): 接触疲劳安全系数。
-
-        N (float): 应力循环次数。
-
-        type (int): 材料类型（曲线类型）。
-
-        exp_adjust (float, optional): 经验系数，决定 N = 10^10 时的值。
-            范围为 0 到 1，对应 0.85 到 1。默认为 0。
-
-    Returns
-    -------
-        float: 计算得到的接触疲劳极限 sigma_h。
-    """
-    # 定义每种材料的应力循环次数和寿命系数
-    adjust_val = np.interp(exp_adjust, [0., 1.], [0.85, 1.])
-    materials = [
-        {
-            'N': [1e-10, 1e4, 3e6, 1e10],
-            'YNT': [2.5, 2.5, 1.0, adjust_val]
-        },
-        {
-            'N': [1e-10, 1e3, 3e6, 1e10],
-            'YNT': [2.5, 2.5, 1.0, adjust_val]
-        },
-        {
-            'N': [1e-10, 1e3, 3e6, 1e10],
-            'YNT': [1.6, 1.6, 1.0, adjust_val]
-        },
-        {
-            'N': [1e-10, 1e3, 3e6, 1e10],
-            'YNT': [1.1, 1.1, 1.0, adjust_val]
-        }
-    ]
-    log_N = np.log10(N)
-    # 获取该材料的载荷循环次数和寿命系数
-    N_values = materials[type]['N']
-    YNT_values = materials[type]['YNT']
-    log_N_values = np.log10(N_values)
-    YNT = np.interp(log_N, log_N_values, YNT_values).item()
-    return f'{N: .2e}', YNT, sigf_lim / sf_min * YNT
-
-
-nloop_1 = 1 * 60 * time_hours * N_I
-nloop_2 = 1 * 60 * time_hours * N_II
-nloop_3 = 1 * 60 * time_hours * N_II
-nloop_4 = 1 * 60 * time_hours * N_III
-SIGH = [
-    calc_sigma_h(SIG_H_LIM_13, SH_MIN, nloop_1, ma_type_13),
-    calc_sigma_h(SIG_H_LIM_24, SH_MIN, nloop_2, ma_type_24),
-    calc_sigma_h(SIG_H_LIM_13, SH_MIN, nloop_3, ma_type_13),
-    calc_sigma_h(SIG_H_LIM_24, SH_MIN, nloop_4, ma_type_24)
-]
-SIGF = [
-    calc_sigma_f(SIG_F_E_13, SF_MIN, nloop_1, ma_type_13),
-    calc_sigma_f(SIG_F_E_24, SF_MIN, nloop_2, ma_type_24),
-    calc_sigma_f(SIG_F_E_13, SF_MIN, nloop_3, ma_type_13),
-    calc_sigma_f(SIG_F_E_24, SF_MIN, nloop_4, ma_type_24)
-]
+m13 = st.selectbox('选择你的小齿轮材料类型：', MaterialType.TYPES)
+m24 = st.selectbox('选择你的大齿轮材料类型：', MaterialType.TYPES)
+GearDraft.set_val(
+    gears, 'material',
+    *[MaterialType.index(mtype) for mtype in [m13, m24, m13, m24]])
 
 st.subheader('接触疲劳强度计算')
 st.write('寿命系数计算方法参考 GB/T 6366-2019 中的表格。')
-st.table(pd.DataFrame(SIGH, range(1, 5), [r'应力循环', r'$Z_N$', r'$\sigma_H$']))
-st.table(pd.DataFrame(SIGF, range(1, 5), [r'应力循环', r'$Y_N$', r'$\sigma_F$']))
-
-SIGH = [SIGH[i][2] for i in range(4)]
-
-YF_DIV_SIGF = [YF[i] / SIGF[i][2] for i in range(4)]
-st.table(pd.DataFrame([[
-    f'{v: .4e}' for v in YF_DIV_SIGF]], columns=[
-    rf'$\frac{{Y_{{F_{i + 1}}}}}{{\sigma_{{F_{i + 1}}}}}$' for i in range(4)
-]))
+material_table = GearDraft.batch_calc(gears, CalcType.MATERIAL)
+st.table(pack_table(material_table))
 # endregion 计算许用值
 
 
 # ------------------------------------------------------------
 # region 计算最小值
 k: float = input_params['k']
-ALPHA_N = Angle(20)
-
-
-def calc_dmin(
-    t_: float, u_: float,
-    k_: float, sigh: float,
-    beta: Angle
-) -> float:
-    """
-    计算齿轮的最小直径 d_min。
-
-    Parameters
-    ----------
-        t_ (float): 小齿轮扭矩，单位为牛米 (Nm)。
-
-        k_ (float): 载荷系数，考虑不同工况下的载荷变化。
-
-        i (float): 传动比，即大齿轮与小齿轮的齿数比。
-
-        sigh (float): 接触疲劳强度，单位为兆帕 (MPa)。
-
-        beta (Angle): 斜齿轮螺旋角，表示齿轮齿的倾斜角度。
-
-    Returns
-    -------
-        float: 计算得到的最小直径 d_min，单位为毫米 (mm)。
-
-    Notes
-    -------
-        - 该计算基于方法 B。
-        - 确保所有输入单位一致，以便获得正确的结果。
-    """
-    zh = 2.5  # 计算区域系数。例如，普通圆柱齿轮通常为 2.5。
-    if float(beta) >= 7.:
-        # 认为只有 β >= 7° 才算斜齿轮
-        alpha_t = math.atan(ALPHA_N.tan() / beta.cos())
-        beta_b = math.atan(beta.tan() * math.cos(alpha_t))
-        alpha_t_1 = alpha_t  # 没有变位
-        zh = math.sqrt(2 * math.cos(beta_b) * math.cos(alpha_t_1) / (
-            math.cos(alpha_t) ** 2 * math.sin(alpha_t_1)
-        ))  # 计算区域系数
-    t_ = 1e3 * t_  # N·mm
-    # print(k_, t_, u_, beta, zh, ZE, sigh)
-    return (
-        2 * k_ * t_ / PHI_D *
-        (u_ + 1) / u_ * beta.cos() *
-        (zh * ZE / sigh) ** 2
-    ) ** (1 / 3)
-
-
-def calc_mmin_tol(
-    t_: float, z_: float, k_: float,
-    yf_div_sigf: float, beta: Angle
-) -> float:
-    """
-    计算齿轮的最小模数 m_min。
-
-    Parameters
-    ----------
-        t_ (float): 小齿轮扭矩，单位为牛米 (Nm)。
-
-        z_ (float): 齿数。
-
-        k_ (float): 载荷系数，考虑不同工况下的载荷变化。
-
-        yf_div_sigf (float): 齿形系数与应力系数的比值。
-
-        beta (Angle): 斜齿轮螺旋角，表示齿轮齿的倾斜角度。
-
-    Returns
-    -------
-        float: 计算得到的最小模数 m_min。
-
-    Notes
-    -------
-        - 该计算基于方法 B。
-        - 确保所有输入单位一致，以便获得正确
-    """
-    t_ = 1e3 * t_  # N·mm
-    zv = z_ / beta.cos()  # 修正齿数
-    return (2 * k_ * t_ / PHI_D / zv**2 * yf_div_sigf) ** (1 / 3)
-
+GearDraft.set_val(gears, 'k', k, k, k, k)
 
 st.subheader('计算最小直径')
-D_MIN = [
-    calc_dmin([T_I, T_II, T_II, T_III][i],
-              [i1, i2][i // 2], k,
-              [min(SIGH[0], SIGH[1]), min(SIGH[2], SIGH[3])][i // 2],
-              [BETA_1, BETA_2][i // 2]
-              ) for i in range(4)
-]
-diameters = [D_MIN[0], D_MIN[0] * i1, D_MIN[2], D_MIN[2] * 2]
+solve_result = GearDraft.batch_calc(gears, CalcType.SOLVE_CONTACT)
+st.table(pack_table(solve_result))
+
 st.table(pd.DataFrame([D_MIN, diameters], index=[
     '原始计算值', '传动比计算的大轮'
 ], columns=[
