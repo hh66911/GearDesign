@@ -265,19 +265,43 @@ class GearSize(GearDataBase):
 
 
 @dataclass
-class GearSolveResult(GearDataBase):
+class GearContactSolveResult(GearDataBase):
     d_min: float
     module: float
     d: float
 
     @staticmethod
-    def pack_table(sizes: list['GearSolveResult']):
+    def pack_table(sizes: list['GearContactSolveResult']):
         data = []
         for size in sizes:
             temp_dict = {
                 r'$d_{min}$': size.d_min,
                 r'$m$': size.module,
                 r'$d$': size.d,
+            }
+            for key, value in temp_dict.items():
+                temp_dict[key] = try_parse_intstr(value, 2)
+            data.append(temp_dict)
+        df = pd.DataFrame(data)
+        df.index = [f'齿轮 ${size.gear_str}$' for size in sizes]
+        return df
+
+@dataclass
+class GearBendingCheckResult(GearDataBase):
+    d: float
+    module_min: float
+    module: float
+    passed: bool
+
+    @staticmethod
+    def pack_table(sizes: list['GearBendingCheckResult']):
+        data = []
+        for size in sizes:
+            temp_dict = {
+                r'$d$': size.d,
+                r'$m_{min}$': size.module_min,
+                r'$m$': size.module,
+                r'通过？': '√' if size.passed else 'X'
             }
             for key, value in temp_dict.items():
                 temp_dict[key] = try_parse_intstr(value, 2)
@@ -300,6 +324,7 @@ class CalcType(Enum):
     FORM_FACTOR = 'form_factor'
     MATERIAL = 'material'
     SOLVE_CONTACT = 's_c'
+    CHECK_BENDING = 'c_m'
 
 
 class GearDraft:
@@ -332,36 +357,41 @@ class GearDraft:
         for gear in gears:
             gear.process_features()
         result: list[GearDataBase] = []
-        if item == CalcType.ALL:
-            for gear in gears:
-                result.append(gear.name)
-            return result
-        if item == CalcType.KINEMATICS:
-            for gear in gears:
-                result.append(gear.get_kinematics())
-            return result
-        if item == CalcType.FORM_FACTOR:
-            for gear in gears:
-                result.append(gear.get_form_factor())
-            return result
-        if item == CalcType.MATERIAL:
-            for gear in gears:
-                result.append(gear.get_material())
-            return result
-        if item == CalcType.SOLVE_CONTACT:
-            d_min_list = []
-            for gear in gears:
-                d_min_list.append(gear.solve_by(0, 'contact'))
-                gear.process_features()
-            d_min_list.reverse()
-            for gear in gears:
-                gear.check_mesh(0, True)
-                result.append(GearSolveResult(
-                    gear.name, d_min_list[-1],
-                    gear.module, gear.d
-                ))
-                d_min_list.pop()
-            return result
+        match item:
+            case CalcType.ALL:
+                for gear in gears:
+                    result.append(gear.name)
+            case CalcType.KINEMATICS:
+                for gear in gears:
+                    result.append(gear.get_kinematics())
+            case CalcType.FORM_FACTOR:
+                for gear in gears:
+                    result.append(gear.get_form_factor())
+            case CalcType.MATERIAL:
+                for gear in gears:
+                    result.append(gear.get_material())
+            case CalcType.SOLVE_CONTACT:
+                d_min_list = []
+                for gear in gears:
+                    d_min_list.append(gear.solve_by(0, 'contact'))
+                    gear.process_features()
+                d_min_list.reverse()
+                for gear in gears:
+                    gear.check_mesh(0, True)
+                    result.append(GearContactSolveResult(
+                        gear.name, d_min_list[-1],
+                        gear.module, gear.d
+                    ))
+                    d_min_list.pop()
+            case CalcType.CHECK_BENDING:
+                for gear in gears:
+                    passed, mmin = gear.check_by(0, 'bending')
+                    gear.process_features()
+                    result.append(GearBendingCheckResult(
+                        gear.name, gear.d,
+                        mmin, gear.module, passed
+                    ))
+        return result
 
     def __init__(self, idx: str, hours: float):
         self.name = idx  # 齿轮名称
@@ -563,7 +593,7 @@ class GearDraft:
     def get_form_factor(self) -> float:
         return GearFormFactor(self.name, *self.form_factor)
 
-    def _calc_min_d(self):
+    def _calc_min_d(self, mesh_idx):
         zh = 2.5  # 计算区域系数。例如，普通圆柱齿轮通常为 2.5。
         if float(self.beta) >= 7.:
             # 认为只有 β >= 7° 才算斜齿轮
@@ -574,7 +604,7 @@ class GearDraft:
                 np.cos(alpha_t) ** 2 * np.sin(alpha_t_1)
             ))  # 计算区域系数
         # print(k_, t_, u_, beta, zh, ZE, sigh)
-        z1, z2 = self.z, self.mesh_with[0].z
+        z1, z2 = self.z, self.mesh_with[mesh_idx].z
         u = max(z1, z2) / min(z1, z2)
         return (
             2 * self.k * self.torque / self.phid *
@@ -583,10 +613,10 @@ class GearDraft:
         ) ** (1 / 3)
 
     def _calc_min_m(self, explicit=False):
+        z1 = self.z / self.beta.cos()  # 修正齿数
         if not explicit:
-            zv = self.z / self.beta.cos()  # 修正齿数
             return (
-                2 * self.k * self.torque / self.phid / zv**2 *
+                2 * self.k * self.torque / self.phid / z1**2 *
                 self.form_factor[2] / self.stress_safe['bending']
             ) ** (1 / 3)
         # 计算 Y_{\beta}
@@ -597,13 +627,13 @@ class GearDraft:
         y_beta = 1 - eps_beta * float(beta) / 120
         y_beta = max(y_beta_min, y_beta, 0.75)
         return (
-            2 * self.k * y_beta * self.torque / self.phid / zv**2 *
+            2 * self.k * y_beta * self.torque / self.phid / z1**2 *
             self.form_factor[2] / self.stress_safe['bending']
         ) ** (1 / 3)
 
     def solve_by(self, mesh_idx=0, stype='contact'):
         if stype == 'contact':
-            d_min = self._calc_min_d()
+            d_min = self._calc_min_d(mesh_idx)
             m = d_min / self.z * self.beta.cos()
             m_std = min(GearDraft.M_SERIES,
                         key=lambda x: x - m if x > m else np.inf)
@@ -623,6 +653,19 @@ class GearDraft:
             if auto_refresh:
                 self.process_features()
                 self.mesh_with[mesh_idx].process_features()
+                
+    def check_by(self, mesh_idx=0, stype='contact'):
+        if stype == 'bending':
+            m_min = self._calc_min_m(True)
+            if self.module >= m_min:
+                return True, m_min
+            return False, m_min
+        if stype == 'contact':
+            d_min = self._calc_min_d(mesh_idx)
+            if self.d >= d_min:
+                return True, d_min
+            return False, d_min
+            
 
     def speed_error(self, target):
         err = (self.speed - target) / target

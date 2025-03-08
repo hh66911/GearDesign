@@ -243,12 +243,6 @@ GearDraft.set_val(gears, 'k', k, k, k, k)
 st.subheader('计算最小直径')
 solve_result = GearDraft.batch_calc(gears, CalcType.SOLVE_CONTACT)
 st.table(pack_table(solve_result))
-
-st.table(pd.DataFrame([D_MIN, diameters], index=[
-    '原始计算值', '传动比计算的大轮'
-], columns=[
-    rf'$d_{{min_{i + 1}}}$' for i in range(4)
-]))
 # endregion 计算最小值
 
 
@@ -258,47 +252,15 @@ st.header('精算')
 
 # ------------------------------------------------------------
 # region 选取模数、中心距
-st.subheader('选取模数')
-M_SERIES = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6]
-zs = [z1, z2, z3, z4]
-MS_RAW = [[BETA_1.cos(), BETA_2.cos()][i // 2] * di / z
-          for i, (di, z) in enumerate(zip(diameters, zs))]
-# 找到最接近的模数
+check_result = GearDraft.batch_calc(gears, CalcType.CHECK_BENDING)
+st.table(pack_table(check_result))
 
-
-def select_m_value(mi):
-    return min(M_SERIES, key=lambda x: x - mi if x > mi else math.inf)
-
-
-ms = [select_m_value(mi) for mi in MS_RAW]
-ms[0] = ms[1] = max(ms[0], ms[1])
-ms[2] = ms[3] = max(ms[2], ms[3])
-st.table(pd.DataFrame([MS_RAW, ms], index=[
-    '$z, d$ 计算 $m$', '取用'
-], columns=[
-    rf'$m_{i + 1}$' for i in range(4)
-]))
-st.write(r'计算最小模数（注意：为了方便，计算使用 $Y_\beta = 1$ 作为安全冗余）')
-M_MIN = [
-    calc_mmin_tol([T_I, T_II, T_II, T_III][i],
-                  [z1, z2, z3, z4][i],
-                  k, YF_DIV_SIGF[i],
-                  [BETA_1, BETA_2][i // 2]
-                  ) for i in range(4)
-]
-M_PASSED = ['OK' if ms[i] > M_MIN[i] else 'Failed' for i in range(4)]
-M_MIN = [
-    f'{mi: .2f}' for mi in M_MIN
-]
-st.table(pd.DataFrame([M_MIN, M_PASSED], index=[
-    '计算最小值', '是否通过'
-], columns=[
-    rf'$m_{{min_{i + 1}}}$' for i in range(4)
-]))
-ms[0] = ms[1] = st.select_slider(
-    '精调高速级模数', M_SERIES[M_SERIES.index(ms[0]):], ms[0])
-ms[2] = ms[3] = st.select_slider(
-    '精调低速级模数', M_SERIES[M_SERIES.index(ms[2]):], ms[2])
+mI = st.select_slider(
+    '精调高速级模数', GearDraft.M_SERIES[GearDraft.M_SERIES.index(
+        solve_result[0].module):], solve_result[0].module)
+mII = st.select_slider(
+    '精调低速级模数', GearDraft.M_SERIES[GearDraft.M_SERIES.index(
+        solve_result[2].module):], solve_result[2].module)
 
 
 st.subheader('选取中心距')
