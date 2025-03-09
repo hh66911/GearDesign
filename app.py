@@ -17,10 +17,9 @@ def input_params_ui():
     st.title('软齿轮系计算')
 
     controller = CookieController(key='cookies')
-    if st.button('加载上次保存的参数'):
-        input_params = controller.get('input_params')
-    else:
-        input_params = None
+    if 'input_params' not in st.session_state:
+        st.session_state.input_params = controller.get('input_params')
+    _input_params = st.session_state.input_params
     INIT_PARAMS = {
         'k': 1., 'time_mode': 0, 'years': 0.,
         'p_in': 5., 'n_in': 100., 'n_out': 1., 'phid': 1., 'coeff': 1.,
@@ -29,75 +28,76 @@ def input_params_ui():
         'sigh_lim_13': 100., 'sigh_lim_24': 100.,
         'sigf_e_13': 100., 'sigf_e_24': 100., 'ze': 100.
     }
-    if input_params is None:
-        input_params = INIT_PARAMS
+    if _input_params is None:
+        _input_params = INIT_PARAMS
     else:
         para_keys = INIT_PARAMS.keys()
         for k in para_keys:
-            if k not in input_params:
-                input_params[k] = INIT_PARAMS[k]
+            if k not in _input_params:
+                _input_params[k] = INIT_PARAMS[k]
 
-    for k in input_params:
+    for k in _input_params:
         if k not in ('z1', 'z3', 'time_mode'):
-            input_params[k] = float(input_params[k])
+            _input_params[k] = float(_input_params[k])
 
     tabs = st.tabs(['工况参数', '材料参数', '尺寸参数', '传动参数'])
     with st.container(border=True):
         with tabs[0]:
-            input_params['k'] = st.number_input('初选工况系数', value=input_params['k'])
+            _input_params['k'] = st.number_input(
+                '初选工况系数', value=_input_params['k'])
             TIME_MODES = ['单班制', '双班制']
-            input_params['time_mode'] = TIME_MODES.index(
-                st.selectbox('选择班制：', TIME_MODES, input_params['time_mode']))
-            input_params['years'] = st.number_input(
-                '工作年数：', value=input_params['years'])
-            input_params['beta_I'] = input_params['beta_I']
-            input_params['beta_II'] = input_params['beta_II']
+            _input_params['time_mode'] = TIME_MODES.index(
+                st.selectbox('选择班制：', TIME_MODES, _input_params['time_mode']))
+            _input_params['years'] = st.number_input(
+                '工作年数：', value=_input_params['years'])
+            _input_params['beta_I'] = _input_params['beta_I']
+            _input_params['beta_II'] = _input_params['beta_II']
 
         with tabs[1]:
-            input_params['sigh_lim_13'] = st.number_input(
-                r'小齿轮接触极限 $\text{(MPa)}$', value=input_params['sigh_lim_13'])
-            input_params['sigf_e_13'] = st.number_input(
-                r'小齿轮抗弯极限 $\text{(MPa)}$', value=input_params['sigf_e_13'])
-            input_params['sigh_lim_24'] = st.number_input(
-                r'大齿轮接触极限 $\text{(MPa)}$', value=input_params['sigh_lim_24'])
-            input_params['sigf_e_24'] = st.number_input(
-                r'大齿轮抗弯极限 $\text{(MPa)}$', value=input_params['sigf_e_24'])
-            input_params['ze'] = st.number_input(
-                r'$Z_e$ ($\sqrt{MPa}$))', value=input_params['ze'])
+            _input_params['sigh_lim_13'] = st.number_input(
+                r'小齿轮接触极限 $\text{(MPa)}$', value=_input_params['sigh_lim_13'])
+            _input_params['sigf_e_13'] = st.number_input(
+                r'小齿轮抗弯极限 $\text{(MPa)}$', value=_input_params['sigf_e_13'])
+            _input_params['sigh_lim_24'] = st.number_input(
+                r'大齿轮接触极限 $\text{(MPa)}$', value=_input_params['sigh_lim_24'])
+            _input_params['sigf_e_24'] = st.number_input(
+                r'大齿轮抗弯极限 $\text{(MPa)}$', value=_input_params['sigf_e_24'])
+            _input_params['ze'] = st.number_input(
+                r'$Z_e$ ($\sqrt{MPa}$))', value=_input_params['ze'])
 
         with tabs[2]:
-            input_params['z1'] = st.number_input(
-                '低速级小齿轮齿数', value=input_params['z1'])
-            input_params['z3'] = st.number_input(
-                '高速级小齿轮齿数', value=input_params['z3'])
-            input_params['beta_I'] = st.number_input(
-                '高速级螺旋角 β (°)', value=input_params['beta_I'])
-            input_params['beta_II'] = st.number_input(
-                '低速级螺旋角 β (°)', value=input_params['beta_II'])
+            _input_params['z1'] = st.number_input(
+                '低速级小齿轮齿数', value=_input_params['z1'])
+            _input_params['z3'] = st.number_input(
+                '高速级小齿轮齿数', value=_input_params['z3'])
+            _input_params['beta_I'] = st.number_input(
+                '高速级螺旋角 β (°)', value=_input_params['beta_I'])
+            _input_params['beta_II'] = st.number_input(
+                '低速级螺旋角 β (°)', value=_input_params['beta_II'])
 
         with tabs[3]:
-            input_params['p_in'] = st.number_input(
-                r'输入功率 $P$ $\text{(kW)}$', value=input_params['p_in'])
-            input_params['n_in'] = st.number_input(
-                r'输入转速 $n$ $\text{(rpm)}$', value=input_params['n_in'])
-            input_params['n_out'] = st.number_input(
-                r'目标转速 $n_{out}$ $\text{(rpm)}$', value=input_params['n_out'])
-            input_params['eta_I'] = st.number_input(
-                r'$\text{I}$ 轴效率', value=input_params['eta_I'])
-            input_params['eta_II'] = st.number_input(
-                r'$\text{II}$ 轴效率', value=input_params['eta_II'])
-            input_params['phid'] = st.number_input(
-                '宽度系数 $Φ_d$', value=input_params['phid'])
-            input_params['coeff'] = st.number_input(
-                '传动比分配系数', value=input_params['coeff'])
+            _input_params['p_in'] = st.number_input(
+                r'输入功率 $P$ $\text{(kW)}$', value=_input_params['p_in'])
+            _input_params['n_in'] = st.number_input(
+                r'输入转速 $n$ $\text{(rpm)}$', value=_input_params['n_in'])
+            _input_params['n_out'] = st.number_input(
+                r'目标转速 $n_{out}$ $\text{(rpm)}$', value=_input_params['n_out'])
+            _input_params['eta_I'] = st.number_input(
+                r'$\text{I}$ 轴效率', value=_input_params['eta_I'])
+            _input_params['eta_II'] = st.number_input(
+                r'$\text{II}$ 轴效率', value=_input_params['eta_II'])
+            _input_params['phid'] = st.number_input(
+                '宽度系数 $Φ_d$', value=_input_params['phid'])
+            _input_params['coeff'] = st.number_input(
+                '传动比分配系数', value=_input_params['coeff'])
 
     if st.button('保存所有数据'):
-        controller.set('input_params', input_params)
+        controller.set('input_params', _input_params)
 
-    input_params['beta_I'] = Angle(input_params['beta_I'])
-    input_params['beta_II'] = Angle(input_params['beta_II'])
+    _input_params['beta_I'] = Angle(_input_params['beta_I'])
+    _input_params['beta_II'] = Angle(_input_params['beta_II'])
 
-    return input_params
+    return _input_params
 
 
 def calc_iI_iII(i_total: float, coeff: float) -> tuple[float, float]:
@@ -123,14 +123,14 @@ I_TOTAL = INPUT_SPEED / input_params['n_out']
 i1, i2 = calc_iI_iII(I_TOTAL, input_params['coeff'])
 # st.write(f'理想高速级转动比 {i1: .2f}，低速级传动比 {i2: .2f}')
 
-z1: int = input_params['z1']
-z3: int = input_params['z3']
+Z1: int = input_params['z1']
+Z3: int = input_params['z3']
 
 time_per_day = [8, 16][input_params['time_mode']]
 n_years = input_params['years']
 time_hours = n_years * 365 * time_per_day
 
-gears = GearDraft.create_gears(time_hours, z1, z1 * i1, z3, z3 * i2)
+gears = GearDraft.create_gears(time_hours, Z1, Z1 * i1, Z3, Z3 * i2)
 GearDraft.set_val(
     gears, 'phid',
     PHI_D, PHI_D, PHI_D, PHI_D
@@ -220,7 +220,7 @@ GearDraft.set_val(
     *([{'contact': SH_MIN, 'bending': SF_MIN}] * 4))
 st.markdown(
     '| $S_{H_{min}}$ | $S_{F_{min}}$ |\n| :-: | :-: |\n' +
-        f'| {SH_MIN} | {SF_MIN} |')
+    f'| {SH_MIN} | {SF_MIN} |')
 
 m13 = st.selectbox('选择你的小齿轮材料类型：', MaterialType.TYPES)
 m24 = st.selectbox('选择你的大齿轮材料类型：', MaterialType.TYPES)
@@ -264,65 +264,48 @@ mII = st.select_slider(
 
 
 st.subheader('选取中心距')
+GearDraft.batch_calc(gears, CalcType.ALL)
+aI = (gears[0].d + gears[1].d) / 2
+aII = (gears[2].d + gears[3].d) / 2
 
 
-def calc_ds(zs, ms):
-    ds = []
-    for i in range(4):
-        ds.append(zs[i] * ms[i] / [BETA_1, BETA_2][i // 2].cos())
-    return ds
+def create_z_slider(z, i, s=10):
+    return st.select_slider(
+        f'$Z_{{\\text{i}}}$', range(z - s, z + s + 1), value=z)
 
 
-diameters = calc_ds(zs, ms)
-D_STR = [f'{d: .2f}' for d in diameters]
-st.table(pd.DataFrame([D_STR], columns=[
-    rf'$d_{i + 1}$' for i in range(4)
-]))
-z1, z2, z3, z4 = zs
-a1 = (diameters[0] + diameters[1]) / 2
-a2 = (diameters[2] + diameters[3]) / 2
+def check_a_for(gear1, gear2):
+    _gears = [gear1, gear2]
+    if gear1.is_helical():  # 斜齿轮
+        z1 = create_z_slider(gear1.z, 1)
+        z2 = create_z_slider(gear2.z, 2)
+        GearDraft.set_val(_gears, 'z', z1, z2)
+        GearDraft.batch_calc(_gears, CalcType.ALL)
+        aI_new = (gear1.d + gear2.d) / 2
+        aI_new = round(aI_new / 5) * 5
+        GearDraft.set_val(_gears, 'a', [aI_new], [aI_new])
+        size = GearDraft.batch_calc(_gears, CalcType.ADJUST_BY_CENTER_DIST)
+        st.write(rf'$\beta$ ：{size[0].beta}')
+    else:  # 直齿轮
+        m = gear1.module
+        aI_delta = 5 * m / math.gcd(5, m)
+        aI_round = round(aI / aI_delta) * aI_delta
+        aI_new = st.number_input('中心距精调', value=aI_round, step=aI_delta)
+        z1, z2 = gear1.z, gear2.z
+        z_delta = 2 * aI_new / m - z1 - z2
+        z1 = z1 + z_delta // 2
+        z2 = z2 + (z_delta + 1) // 2
+        z_bias = st.number_input('齿数增减偏置：', value=0)
+        GearDraft.set_val(_gears, 'z', z1 + z_bias, z2 - z_bias)
+        GearDraft.batch_calc(_gears, CalcType.ALL)
+    st.write(f'中心距：{aI: .2f} -> {aI_new}')
 
-if float(BETA_1) < 8.:
-    a1_delta = 5 * ms[0] / math.gcd(5, ms[0])
-    a1_round = round(a1 / a1_delta) * a1_delta
-    a1_new = st.number_input('高速级中心距精调', value=a1_round, step=a1_delta)
-    z_12_delta = 2 * a1_new / ms[0] - zs[0] - zs[1]
-    z1 = z1 + z_12_delta // 2
-    z2 = z2 + (z_12_delta + 1) // 2
-    z12_bias = st.number_input('高速级齿数增减偏置：', value=0)
-    z1 += z12_bias
-    z2 -= z12_bias
-else:
-    z1 = st.select_slider('$Z_1$', range(z1 - 10, z1 + 12), value=z1)
-    z2 = st.select_slider('$Z_2$', range(z2 - 10, z2 + 12), value=z2)
-    zs[0], zs[1] = z1, z2
-    diameters = calc_ds(zs, ms)
-    a1_new = (diameters[0] + diameters[1]) / 2
-    a1_round = round(a1_new / 5) * 5
-    BETA_1 = Angle(math.acos(ms[0] * (z1 + z2) / 2 / a1_round) / math.pi * 180)
-    st.write(rf'高速级 $\beta$ ：{BETA_1}')
-st.write(f'高速级中心距：{a1: .2f} -> {a1_round}')
 
-if float(BETA_2) < 8.:
-    a2_delta = 5 * ms[2] / math.gcd(5, ms[2])
-    a2_round = round(a2 / a2_delta) * a2_delta
-    a2_new = st.number_input('低速级中心距精调', value=a2_round, step=a2_delta)
-    z_34_delta = 2 * a2_new / ms[2] - zs[2] - zs[3]
-    z3 = z3 + z_34_delta // 2
-    z4 = z4 + (z_34_delta + 1) // 2
-    z34_bias = st.number_input('低速级齿数增减偏置：', value=0)
-    z3 += z34_bias
-    z4 -= z34_bias
-else:
-    z3 = st.select_slider('$Z_3$', range(z3 - 10, z3 + 12), value=z3)
-    z4 = st.select_slider('$Z_4$', range(z4 - 10, z4 + 12), value=z4)
-    zs[2], zs[3] = z3, z4
-    diameters = calc_ds(zs, ms)
-    a2_new = (diameters[2] + diameters[3]) / 2
-    a2_round = round(a2_new / 5) * 5
-    BETA_2 = Angle(math.acos(ms[0] * (z3 + z4) / 2 / a2_round) / math.pi * 180)
-    st.write(rf'高速级 $\beta$ ：{BETA_1}')
-st.write(f'低速级中心距：{a2: .2f} -> {a2_round}')
+st.subheader('高速级精调')
+check_a_for(*gears[:2])
+st.subheader('低速级精调')
+check_a_for(*gears[2:])
+
 
 zs = [z1, z2, z3, z4]
 zs = [int(zi) for zi in zs]

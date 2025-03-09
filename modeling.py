@@ -286,6 +286,7 @@ class GearContactSolveResult(GearDataBase):
         df.index = [f'齿轮 ${size.gear_str}$' for size in sizes]
         return df
 
+
 @dataclass
 class GearBendingCheckResult(GearDataBase):
     d: float
@@ -325,6 +326,7 @@ class CalcType(Enum):
     MATERIAL = 'material'
     SOLVE_CONTACT = 's_c'
     CHECK_BENDING = 'c_m'
+    ADJUST_BY_CENTER_DIST = 'adj_a'
 
 
 class GearDraft:
@@ -361,6 +363,7 @@ class GearDraft:
             case CalcType.ALL:
                 for gear in gears:
                     result.append(gear.name)
+                    result.append(gear.get_size())
             case CalcType.KINEMATICS:
                 for gear in gears:
                     result.append(gear.get_kinematics())
@@ -391,7 +394,19 @@ class GearDraft:
                         gear.name, gear.d,
                         mmin, gear.module, passed
                     ))
+            case CalcType.ADJUST_BY_CENTER_DIST:
+                for gear in gears:
+                    gear.check_a(0, True)
+                    result.append(gear.get_size())
         return result
+
+    __slots__ = [
+        'name', 'time', 'z', 'module', 'phid',
+        'form_factor', 'd', 'b', 'da', 'df', 'alpha', 'beta', 'ha', 'hf', 'h',
+        'torque', 'speed', 'power', 'axial_force', 'n_round', 'eta',
+        'material', 'stress_lim', 'safe_factor', 'life_factor', 'stress_safe',
+        'z_elastic', 'k', 'mesh_with', 'a', 'fixed_with'
+    ]
 
     def __init__(self, idx: str, hours: float):
         self.name = idx  # 齿轮名称
@@ -436,6 +451,7 @@ class GearDraft:
         self.k = None  # 载荷系数
 
         self.mesh_with: list[GearDraft] = []  # 与其他齿轮啮合
+        self.a: list[float] = []  # 中心距
         self.fixed_with: list[GearDraft] = []  # 与其他齿轮在一根轴上
 
     def process_features(self):
@@ -533,7 +549,7 @@ class GearDraft:
             print("无法计算齿轮的接触应力和弯曲应力")
 
         if notNone(self.z, self.module):
-            self.d = self.module * self.z
+            self.d = self.module * self.z / self.beta.cos()
             self.b = self.d * self.phid
             self.ha = self.module
             self.hf = 1.25 * self.module
@@ -593,6 +609,12 @@ class GearDraft:
     def get_form_factor(self) -> float:
         return GearFormFactor(self.name, *self.form_factor)
 
+    def get_size(self):
+        return GearSize(
+            self.name, self.module, self.z, self.d, self.da,
+            self.df, self.alpha, self.beta, self.ha, self.hf, self.h
+        )
+
     def _calc_min_d(self, mesh_idx):
         zh = 2.5  # 计算区域系数。例如，普通圆柱齿轮通常为 2.5。
         if float(self.beta) >= 7.:
@@ -646,14 +668,28 @@ class GearDraft:
 
     def check_mesh(self, mesh_idx=0, auto_refresh=True):
         module2 = self.mesh_with[mesh_idx].module
-        if module2 != self.module:
+        if module2 == self.module:
             module = max(self.module, module2)
             self.module = module
             self.mesh_with[mesh_idx].module = module
             if auto_refresh:
                 self.process_features()
                 self.mesh_with[mesh_idx].process_features()
-                
+
+    def check_a(self, mesh_idx=0, auto_refresh=True):
+        z1, z2 = self.z, self.mesh_with[mesh_idx].z
+        if self.a != self.mesh_with[mesh_idx].a:
+            raise ValueError('两啮合齿轮的中心距不等！')
+        a = (self.d + self.mesh_with[mesh_idx].d) / 2
+        if self.a[mesh_idx] != a:
+            # 修正 Beta
+            self.beta = Angle(np.rad2deg(
+                np.arccos(self.module * (z1 + z2) / 2 / self.a)
+            ))
+        if auto_refresh:
+            self.process_features()
+            self.mesh_with[mesh_idx].process_features()
+
     def check_by(self, mesh_idx=0, stype='contact'):
         if stype == 'bending':
             m_min = self._calc_min_m(True)
@@ -665,10 +701,12 @@ class GearDraft:
             if self.d >= d_min:
                 return True, d_min
             return False, d_min
-            
 
     def speed_error(self, target):
         err = (self.speed - target) / target
         if err > 0.005:
             return f'转速误差：{err: .2f}%'
         return f'转速误差：{err: .4f}%'
+
+    def is_helical(self):
+        return self.beta is not None and float(self.beta) > 7.
