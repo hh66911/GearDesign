@@ -32,13 +32,13 @@ def input_params_ui():
         _input_params = INIT_PARAMS
     else:
         para_keys = INIT_PARAMS.keys()
-        for k in para_keys:
-            if k not in _input_params:
-                _input_params[k] = INIT_PARAMS[k]
+        for _k in para_keys:
+            if _k not in _input_params:
+                _input_params[_k] = INIT_PARAMS[_k]
 
-    for k in _input_params:
-        if k not in ('z1', 'z3', 'time_mode'):
-            _input_params[k] = float(_input_params[k])
+    for _k in _input_params:
+        if _k not in ('z1', 'z3', 'time_mode'):
+            _input_params[_k] = float(_input_params[_k])
 
     tabs = st.tabs(['工况参数', '材料参数', '尺寸参数', '传动参数'])
     with st.container(border=True):
@@ -121,7 +121,6 @@ PHI_D: float = input_params['phid']
 
 I_TOTAL = INPUT_SPEED / input_params['n_out']
 i1, i2 = calc_iI_iII(I_TOTAL, input_params['coeff'])
-# st.write(f'理想高速级转动比 {i1: .2f}，低速级传动比 {i2: .2f}')
 
 Z1: int = input_params['z1']
 Z3: int = input_params['z3']
@@ -140,7 +139,7 @@ ETA_I: float = input_params['eta_I']
 ETA_II: float = input_params['eta_II']
 GearDraft.set_val(
     gears, 'eta',
-    ETA_I, 1, ETA_II, 1
+    ETA_I, 1, ETA_II, None
 )
 
 # 计算各级运动学参数
@@ -153,6 +152,7 @@ g3 = g2 @ gears[3]
 i1 = gears[0].gear_ratio(g1)
 i2 = gears[2].gear_ratio(g3)
 st.write(f'粗算高速级转动比 {i1: .2f}，低速级传动比 {i2: .2f}')
+st.write(gears[3].speed_error(input_params['n_out']))
 
 kine = GearDraft.batch_calc(gears, CalcType.KINEMATICS)
 st.subheader('运动学参数')
@@ -284,8 +284,8 @@ def check_a_for(gear1, gear2):
         aI_new = (gear1.d + gear2.d) / 2
         aI_new = round(aI_new / 5) * 5
         GearDraft.set_val(_gears, 'a', [aI_new], [aI_new])
-        size = GearDraft.batch_calc(_gears, CalcType.ADJUST_BY_CENTER_DIST)
-        st.write(rf'$\beta$ ：{size[0].beta}')
+        _size = GearDraft.batch_calc(_gears, CalcType.ADJUST_BY_CENTER_DIST)
+        st.write(rf'$\beta$ ：{_size[0].beta}')
     else:  # 直齿轮
         m = gear1.module
         aI_delta = 5 * m / math.gcd(5, m)
@@ -297,40 +297,22 @@ def check_a_for(gear1, gear2):
         z2 = z2 + (z_delta + 1) // 2
         z_bias = st.number_input('齿数增减偏置：', value=0)
         GearDraft.set_val(_gears, 'z', z1 + z_bias, z2 - z_bias)
-        GearDraft.batch_calc(_gears, CalcType.ALL)
+        _size = GearDraft.batch_calc(_gears, CalcType.ALL)
     st.write(f'中心距：{aI: .2f} -> {aI_new}')
+    return _size
 
 
 st.subheader('高速级精调')
-check_a_for(*gears[:2])
+size = check_a_for(gears[0], gears[1])
 st.subheader('低速级精调')
-check_a_for(*gears[2:])
+size += check_a_for(gears[2], gears[3])
 
-
-zs = [z1, z2, z3, z4]
-zs = [int(zi) for zi in zs]
-diameters = calc_ds(zs, ms)
-ZS_STR = [str(zi) for zi in zs]
-D_STR = [f'{d: .2f}' for d in diameters]
-st.table(pd.DataFrame([ZS_STR, D_STR], index=[
-    '齿数', '直径'
-], columns=[
-    f'齿轮 {i + 1}' for i in range(4)
-]))
-st.write(r'提示：如果发现 $d_2$ $d_4$ 差的比较大，调最上面的传动比分配系数。系数越大，$\frac{d_2}{d_4}$ 越大')
 
 st.subheader('传动参数')
-calc_i1_i2()
+i1 = size[1].z / size[0].z
+i2 = size[3].z / size[2].z
 st.write(f'再算高速级转动比 {i1: .2f}，低速级传动比 {i2: .2f}')
-calc_Ns(True)
-calc_Ts(True)
-st.subheader('齿形系数')
-calc_all_yfs_and_show()
-YF_DIV_SIGF = [YF[i] / SIGF[i][2] for i in range(4)]
-st.table(pd.DataFrame([[
-    f'{v: .4e}' for v in YF_DIV_SIGF]], columns=[
-    rf'$\frac{{Y_{{F_{i + 1}}}}}{{\sigma_{{F_{i + 1}}}}}$' for i in range(4)
-]))
+st.write(gears[3].speed_error(input_params['n_out']))
 # endregion 选取模数、中心距
 
 

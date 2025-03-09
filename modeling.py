@@ -146,6 +146,29 @@ class GearDataBase:
 
 
 @dataclass
+class GearForce(GearDataBase):
+    tangent: float
+    radial: float
+    axial: float
+
+    @staticmethod
+    def pack_table(kinematics: list['GearKinematics']):
+        data = []
+        for kin in kinematics:
+            temp_dict = {
+                r'切向力': kin.speed,
+                r'径向力': kin.torque,
+                r'轴向力': kin.power,
+            }
+            for key, value in temp_dict.items():
+                temp_dict[key] = try_parse_intstr(value, 2)
+            data.append(temp_dict)
+        df = pd.DataFrame(data)
+        df.index = [f'齿轮 ${kin.gear_str}$' for kin in kinematics]
+        return df
+
+
+@dataclass
 class GearKinematics(GearDataBase):
     speed: float  # 转速
     torque: float  # 扭矩
@@ -321,6 +344,7 @@ def pack_table(datalist) -> pd.DataFrame:
 
 class CalcType(Enum):
     ALL = 'all'
+    FORCES = 'f'
     KINEMATICS = 'kinematics'
     FORM_FACTOR = 'form_factor'
     MATERIAL = 'material'
@@ -362,8 +386,10 @@ class GearDraft:
         match item:
             case CalcType.ALL:
                 for gear in gears:
-                    result.append(gear.name)
                     result.append(gear.get_size())
+            case CalcType.FORCES:
+                for gear in gears:
+                    result.append(gear.get_force())
             case CalcType.KINEMATICS:
                 for gear in gears:
                     result.append(gear.get_kinematics())
@@ -403,9 +429,9 @@ class GearDraft:
     __slots__ = [
         'name', 'time', 'z', 'module', 'phid',
         'form_factor', 'd', 'b', 'da', 'df', 'alpha', 'beta', 'ha', 'hf', 'h',
-        'torque', 'speed', 'power', 'axial_force', 'n_round', 'eta',
-        'material', 'stress_lim', 'safe_factor', 'life_factor', 'stress_safe',
-        'z_elastic', 'k', 'mesh_with', 'a', 'fixed_with'
+        'torque', 'speed', 'power', 'tangent_force', 'radial_force', 'axial_force',
+        'n_round', 'eta', 'material', 'stress_lim', 'safe_factor', 'life_factor',
+        'stress_safe', 'z_elastic', 'k', 'mesh_with', 'a', 'fixed_with'
     ]
 
     def __init__(self, idx: str, hours: float):
@@ -427,6 +453,8 @@ class GearDraft:
         self.torque = None  # 扭矩
         self.speed = None  # 转速
         self.power = None  # 功率
+        self.tangent_force = None  # 切向力
+        self.radial_force = None  # 径向力
         self.axial_force = None  # 轴向力
         self.n_round = None  # 总转数
         self.eta = None  # 效率
@@ -472,6 +500,18 @@ class GearDraft:
                 print(f"找到 None: {false_pos}")
             return len(false_pos) == 0
 
+        if notNone(self.power, self.speed):
+            self.torque = (self.power * 60e6) / (2 * np.pi * self.speed)
+        elif notNone(self.torque, self.power):
+            self.speed = (60e6 * self.power) / (2 * np.pi * self.torque)
+        elif notNone(self.speed, self.torque):
+            self.power = (self.torque * 2 * np.pi * self.speed) / 60e6
+        else:
+            print("无法计算齿轮的功率、扭矩和转速")
+            return False
+
+        self.n_round = self.time * self.speed * 60
+
         def ysa(z, beta):
             zv = z / beta.cos() ** 3
             if zv < 35:
@@ -514,20 +554,9 @@ class GearDraft:
             ysa = ysa(self.z, self.beta)
             yfa = yfa(self.z, self.beta)
             self.form_factor = [ysa, ysa, yfa * yfa]
-
-        if notNone(self.power, self.speed):
-            self.torque = (self.power * 60e6) / (2 * np.pi * self.speed)
-        elif notNone(self.torque, self.power):
-            self.speed = (60e6 * self.power) / (2 * np.pi * self.torque)
-        elif notNone(self.speed, self.torque):
-            self.power = (self.torque * 2 * np.pi * self.speed) / 60e6
         else:
-            print("无法计算齿轮的功率、扭矩和转速")
-
-        if self.speed is not None:
-            self.n_round = self.time * self.speed * 60
-        else:
-            print("无法计算齿轮的总转数")
+            print("无法计算齿形系数")
+            return False
 
         if notNone(self.n_round, self.stress_lim,
                    self.safe_factor, self.material):
@@ -546,7 +575,8 @@ class GearDraft:
             self.stress_safe['bending'] = sigma
             self.life_factor['bending'] = coeff
         else:
-            print("无法计算齿轮的接触应力和弯曲应力")
+            print("无法计算齿轮的许用接触应力和许用弯曲应力")
+            return False
 
         if notNone(self.z, self.module):
             self.d = self.module * self.z / self.beta.cos()
@@ -558,6 +588,13 @@ class GearDraft:
             self.df = self.d - 2 * self.hf
         else:
             print("无法计算齿轮的几何特征")
+            return False
+
+        self.tangent_force = 2 * self.torque / self.d
+        self.radial_force = self.tangent_force * self.alpha.tan()
+        self.axial_force = self.tangent_force * self.beta.tan()
+
+        return True
 
     def __matmul__(self, gear2: 'GearDraft') -> "GearDraft":
         '''
@@ -585,6 +622,14 @@ class GearDraft:
         self.fixed_with.append(gear2)
         gear2.fixed_with.append(self)
         return gear2
+
+    def get_force(self):
+        return GearForce(
+            self.name,
+            self.tangent_force,
+            self.radial_force,
+            self.axial_force
+        )
 
     def get_kinematics(self):
         return GearKinematics(
@@ -668,7 +713,7 @@ class GearDraft:
 
     def check_mesh(self, mesh_idx=0, auto_refresh=True):
         module2 = self.mesh_with[mesh_idx].module
-        if module2 == self.module:
+        if module2 != self.module:
             module = max(self.module, module2)
             self.module = module
             self.mesh_with[mesh_idx].module = module
@@ -683,8 +728,11 @@ class GearDraft:
         a = (self.d + self.mesh_with[mesh_idx].d) / 2
         if self.a[mesh_idx] != a:
             # 修正 Beta
+            print(self.module,  (z1 + z2), self.a[mesh_idx])
             self.beta = Angle(np.rad2deg(
-                np.arccos(self.module * (z1 + z2) / 2 / self.a)
+                np.arccos(
+                    self.module * (z1 + z2) / 2 / self.a[mesh_idx]
+                )
             ))
         if auto_refresh:
             self.process_features()
