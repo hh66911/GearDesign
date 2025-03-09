@@ -171,6 +171,7 @@ class GearForce(GearDataBase):
 @dataclass
 class GearKinematics(GearDataBase):
     speed: float  # 转速
+    velocity: float | None  # 线速度
     torque: float  # 扭矩
     power: float  # 功率
     nloops: float  # 应力循环
@@ -259,22 +260,26 @@ class GearSize(GearDataBase):
     ha: float
     hf: float
     h: float
+    b: float
+    a: float
 
     @staticmethod
     def pack_table(sizes: list['GearSize']):
         data = []
         for size in sizes:
             temp_dict = {
-                r'模数 ($mm$)': size.module,
+                r'模数': size.module,
                 r'齿数': size.z,
-                r'分度圆直径 ($mm$)': size.d,
-                r'齿顶圆直径 ($mm$)': size.da,
-                r'齿根圆直径 ($mm$)': size.df,
-                r'压力角 ($°$)': size.alpha,
-                r'螺旋角 ($°$)': size.beta,
-                r'齿顶高 ($mm$)': size.ha,
-                r'齿根高 ($mm$)': size.hf,
-                r'全齿高 ($mm$)': size.h
+                r'分度圆直径': size.d,
+                r'齿顶圆直径': size.da,
+                r'齿根圆直径': size.df,
+                r'压力角': size.alpha,
+                r'螺旋角': size.beta,
+                r'齿顶高': size.ha,
+                r'齿根高': size.hf,
+                r'全齿高': size.h,
+                r'齿宽': size.b,
+                r'中心距': size.a
             }
             for key, value in temp_dict.items():
                 if isinstance(value, float):
@@ -335,6 +340,31 @@ class GearBendingCheckResult(GearDataBase):
         return df
 
 
+@dataclass
+class GearContactCheckResult(GearDataBase):
+    module: float
+    d_min: float
+    d: float
+    passed: bool
+
+    @staticmethod
+    def pack_table(sizes: list['GearContactCheckResult']):
+        data = []
+        for size in sizes:
+            temp_dict = {
+                r'$m$': size.module,
+                r'$d_{min}$': size.d_min,
+                r'$d$': size.d,
+                r'通过？': '√' if size.passed else 'X'
+            }
+            for key, value in temp_dict.items():
+                temp_dict[key] = try_parse_intstr(value, 2)
+            data.append(temp_dict)
+        df = pd.DataFrame(data)
+        df.index = [f'齿轮 ${size.gear_str}$' for size in sizes]
+        return df
+
+
 def pack_table(datalist) -> pd.DataFrame:
     ele_sample = datalist[0]
     for cls in GearDataBase.__subclasses__():
@@ -343,13 +373,15 @@ def pack_table(datalist) -> pd.DataFrame:
 
 
 class CalcType(Enum):
-    ALL = 'all'
+    NORETURN = 'none'
+    SIZE = 'size'
     FORCES = 'f'
     KINEMATICS = 'kinematics'
     FORM_FACTOR = 'form_factor'
     MATERIAL = 'material'
     SOLVE_CONTACT = 's_c'
     CHECK_BENDING = 'c_m'
+    CHECK_CONTACT = 'c_c'
     ADJUST_BY_CENTER_DIST = 'adj_a'
 
 
@@ -379,12 +411,12 @@ class GearDraft:
 
     @staticmethod
     def batch_calc(gears: list['GearDraft'],
-                   item=CalcType.ALL) -> list[GearDataBase]:
+                   item=CalcType.NORETURN) -> list[GearDataBase]:
         for gear in gears:
             gear.process_features()
         result: list[GearDataBase] = []
         match item:
-            case CalcType.ALL:
+            case CalcType.SIZE:
                 for gear in gears:
                     result.append(gear.get_size())
             case CalcType.FORCES:
@@ -419,6 +451,14 @@ class GearDraft:
                     result.append(GearBendingCheckResult(
                         gear.name, gear.d,
                         mmin, gear.module, passed
+                    ))
+            case CalcType.CHECK_CONTACT:
+                for gear in gears:
+                    passed, dmin = gear.check_by(0, 'contact')
+                    gear.process_features()
+                    result.append(GearContactCheckResult(
+                        gear.name, gear.module,
+                        dmin, gear.d, passed
                     ))
             case CalcType.ADJUST_BY_CENTER_DIST:
                 for gear in gears:
@@ -632,10 +672,13 @@ class GearDraft:
         )
 
     def get_kinematics(self):
+        if self.d is not None:
+            velocity = self.speed * self.d * np.pi / 60e3
+        else: velocity = None
         return GearKinematics(
             self.name, self.speed,
-            self.torque, self.power,
-            self.n_round
+            velocity, self.torque,
+            self.power, self.n_round
         )
 
     def get_material(self):
@@ -648,8 +691,8 @@ class GearDraft:
             self.z_elastic
         )
 
-    def gear_ratio(self, gear2: 'GearDraft'):
-        return gear2.z / self.z
+    def gear_ratio(self, mesh_idx=0):
+        return self.mesh_with[mesh_idx].z / self.z
 
     def get_form_factor(self) -> float:
         return GearFormFactor(self.name, *self.form_factor)
@@ -657,7 +700,8 @@ class GearDraft:
     def get_size(self):
         return GearSize(
             self.name, self.module, self.z, self.d, self.da,
-            self.df, self.alpha, self.beta, self.ha, self.hf, self.h
+            self.df, self.alpha, self.beta, self.ha, self.hf,
+            self.h, self.b, self.a[0]
         )
 
     def _calc_min_d(self, mesh_idx):
@@ -727,6 +771,8 @@ class GearDraft:
             raise ValueError('两啮合齿轮的中心距不等！')
         a = (self.d + self.mesh_with[mesh_idx].d) / 2
         if self.a[mesh_idx] != a:
+            if float(self.beta) == 0:
+                raise ValueError('直齿轮中心距错误值')
             # 修正 Beta
             print(self.module,  (z1 + z2), self.a[mesh_idx])
             self.beta = Angle(np.rad2deg(
@@ -734,9 +780,9 @@ class GearDraft:
                     self.module * (z1 + z2) / 2 / self.a[mesh_idx]
                 )
             ))
-        if auto_refresh:
-            self.process_features()
-            self.mesh_with[mesh_idx].process_features()
+            if auto_refresh:
+                self.process_features()
+                self.mesh_with[mesh_idx].process_features()
 
     def check_by(self, mesh_idx=0, stype='contact'):
         if stype == 'bending':
@@ -751,7 +797,7 @@ class GearDraft:
             return False, d_min
 
     def speed_error(self, target):
-        err = (self.speed - target) / target
+        err = (self.speed - target) / target * 1e2
         if err > 0.005:
             return f'转速误差：{err: .2f}%'
         return f'转速误差：{err: .4f}%'

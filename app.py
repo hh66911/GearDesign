@@ -1,3 +1,5 @@
+from modeling import GearSize, GearForce
+from modeling import try_parse_intstr as tostr
 import math
 import io
 import streamlit as st
@@ -145,12 +147,18 @@ GearDraft.set_val(
 # 计算各级运动学参数
 gears[0].power = INPUT_POWER
 gears[0].speed = INPUT_SPEED
-g1 = gears[0] @ gears[1]
-g2 = g1 - gears[2]
-g3 = g2 @ gears[3]
 
-i1 = gears[0].gear_ratio(g1)
-i2 = gears[2].gear_ratio(g3)
+
+def mesh_gears(_gears):
+    g1 = _gears[0] @ _gears[1]
+    g2 = g1 - _gears[2]
+    _ = g2 @ _gears[3]
+    i1 = _gears[0].gear_ratio(0)
+    i2 = _gears[2].gear_ratio(0)
+    return i1, i2
+
+
+i1, i2 = mesh_gears(gears)
 st.write(f'粗算高速级转动比 {i1: .2f}，低速级传动比 {i2: .2f}')
 st.write(gears[3].speed_error(input_params['n_out']))
 
@@ -245,28 +253,22 @@ solve_result = GearDraft.batch_calc(gears, CalcType.SOLVE_CONTACT)
 st.table(pack_table(solve_result))
 # endregion 计算最小值
 
-
 st.markdown('---')
 st.header('精算')
 
-
 # ------------------------------------------------------------
 # region 选取模数、中心距
-check_result = GearDraft.batch_calc(gears, CalcType.CHECK_BENDING)
-st.table(pack_table(check_result))
-
 mI = st.select_slider(
     '精调高速级模数', GearDraft.M_SERIES[GearDraft.M_SERIES.index(
         solve_result[0].module):], solve_result[0].module)
 mII = st.select_slider(
     '精调低速级模数', GearDraft.M_SERIES[GearDraft.M_SERIES.index(
         solve_result[2].module):], solve_result[2].module)
-
+GearDraft.set_val(gears, 'module', mI, mI, mII, mII)
+check_result = GearDraft.batch_calc(gears, CalcType.CHECK_BENDING)
+st.table(pack_table(check_result))
 
 st.subheader('选取中心距')
-GearDraft.batch_calc(gears, CalcType.ALL)
-aI = (gears[0].d + gears[1].d) / 2
-aII = (gears[2].d + gears[3].d) / 2
 
 
 def create_z_slider(z, i, s=10):
@@ -276,13 +278,15 @@ def create_z_slider(z, i, s=10):
 
 def check_a_for(gear1, gear2):
     _gears = [gear1, gear2]
+    GearDraft.batch_calc(gears, CalcType.NORETURN)
+    aI = (gear1.d + gear2.d) / 2
     if gear1.is_helical():  # 斜齿轮
-        z1 = create_z_slider(gear1.z, 1)
-        z2 = create_z_slider(gear2.z, 2)
+        z1 = create_z_slider(gear1.z, gear1.name)
+        z2 = create_z_slider(gear2.z, gear2.name)
         GearDraft.set_val(_gears, 'z', z1, z2)
-        GearDraft.batch_calc(_gears, CalcType.ALL)
-        aI_new = (gear1.d + gear2.d) / 2
-        aI_new = round(aI_new / 5) * 5
+        GearDraft.batch_calc(_gears, CalcType.NORETURN)
+        aI = (gear1.d + gear2.d) / 2
+        aI_new = round(aI / 5) * 5
         GearDraft.set_val(_gears, 'a', [aI_new], [aI_new])
         _size = GearDraft.batch_calc(_gears, CalcType.ADJUST_BY_CENTER_DIST)
         st.write(rf'$\beta$ ：{_size[0].beta}')
@@ -297,20 +301,23 @@ def check_a_for(gear1, gear2):
         z2 = z2 + (z_delta + 1) // 2
         z_bias = st.number_input('齿数增减偏置：', value=0)
         GearDraft.set_val(_gears, 'z', z1 + z_bias, z2 - z_bias)
-        _size = GearDraft.batch_calc(_gears, CalcType.ALL)
-    st.write(f'中心距：{aI: .2f} -> {aI_new}')
-    return _size
+        GearDraft.set_val(_gears, 'a', [aI_new], [aI_new])
+        _size = GearDraft.batch_calc(_gears, CalcType.ADJUST_BY_CENTER_DIST)
+    return _size, aI, aI_new
 
 
 st.subheader('高速级精调')
-size = check_a_for(gears[0], gears[1])
+size12, a, a_new = check_a_for(gears[0], gears[1])
+st.write(f'高速级中心距：{a: .2f} -> {a_new}')
 st.subheader('低速级精调')
-size += check_a_for(gears[2], gears[3])
+size23, a, a_new = check_a_for(gears[2], gears[3])
+st.write(f'低速级中心距：{a: .2f} -> {a_new}')
+size = size12 + size23
 
+st.table(pack_table(size))
 
 st.subheader('传动参数')
-i1 = size[1].z / size[0].z
-i2 = size[3].z / size[2].z
+i1, i2 = mesh_gears(gears)
 st.write(f'再算高速级转动比 {i1: .2f}，低速级传动比 {i2: .2f}')
 st.write(gears[3].speed_error(input_params['n_out']))
 # endregion 选取模数、中心距
@@ -331,10 +338,9 @@ k_param['kb'] = st.number_input(r'$K_\beta$', value=1.)
 k_param = [dict(k_param), dict(k_param)]
 st.write('暂支支持 8 级齿轮')
 
-force_12 = 1e3 * T_I / (diameters[0] / 2)
-force_34 = 1e3 * T_II / (diameters[2] / 2)
-kfb_12 = force_12 / (diameters[0] * PHI_D)
-kfb_34 = force_34 / (diameters[2] * PHI_D)
+forces = GearDraft.batch_calc(gears, CalcType.FORCES)
+kfb_12 = forces[0].tangent / (size[0].d * PHI_D)
+kfb_34 = forces[2].tangent / (size[2].d * PHI_D)
 KFB_SHOW = [[f'{kfb_12: .2f}', f'{kfb_34: .2f}']]
 st.table(pd.DataFrame(KFB_SHOW, columns=[
     rf'$\frac{{K_A F_{{t_{i + 1}}}}}{{b_{i + 1}}}$' for i in [0, 2]
@@ -342,9 +348,9 @@ st.table(pd.DataFrame(KFB_SHOW, columns=[
 k_param[0]['ka'] = st.number_input(r'高速级 $K_\alpha$', value=1.)
 k_param[1]['ka'] = st.number_input(r'低速级 $K_\alpha$', value=1.)
 
-vel_12 = math.pi * N_I * diameters[0] / 60e3
-vel_34 = math.pi * N_II * diameters[2] / 60e3
-st.write(f'$v_I$：{vel_12: .2f}，$v_{{II}}$：{vel_34: .2f}')
+kine = GearDraft.batch_calc(gears, CalcType.KINEMATICS)
+st.write(
+    f'$v_I$：{kine[0].velocity: .2f} m/s，$v_{{II}}$：{kine[2].velocity: .2f} m/s')
 k_param[0]['kv'] = st.number_input('高速级动载系数', value=1.)
 k_param[1]['kv'] = st.number_input('低速级动载系数', value=1.)
 
@@ -355,104 +361,21 @@ k_param = [
 
 st.write(f'$K_I$：{k_param[0]: .4f}，$K_{{II}}$：{k_param[1]: .4f}')
 
-D_MIN = [
-    calc_dmin([T_I, T_II, T_II, T_III][i],
-              [i1, i2][i // 2],
-              k_param[i // 2],
-              [min(SIGH[0], SIGH[1]), min(SIGH[2], SIGH[3])][i // 2],
-              [BETA_1, BETA_2][i // 2]
-              ) for i in range(4)
-]
-D_PASSED = ['√' if diameters[i] > D_MIN[i] else '×' for i in range(4)]
-D_MIN = [f'{di: .2f}' for di in D_MIN]
-st.table(pd.DataFrame([D_STR, D_MIN, D_PASSED], index=[
-    '当前值', '计算最小值', '是否通过'
-], columns=[
-    rf'$d_{{min_{i + 1}}}$' for i in range(4)
-]))
-M_MIN = [
-    calc_mmin_tol([T_I, T_II, T_II, T_III][i],
-                  zs[i], k_param[i // 2],
-                  YF_DIV_SIGF[i],
-                  [BETA_1, BETA_2][i // 2]
-                  ) for i in range(4)
-]
-M_PASSED = ['√' if ms[i] > M_MIN[i] else '×' for i in range(4)]
-M_MIN = [f'{mi: .2f}' for mi in M_MIN
-         ]
-M_STR = [f'{mi: .2f}' for mi in ms]
-st.table(pd.DataFrame([M_STR, M_MIN, M_PASSED], index=[
-    '当前值', '计算最小值', '是否通过'
-], columns=[
-    rf'$m_{{min_{i + 1}}}$' for i in range(4)
-]))
+GearDraft.set_val(gears, 'k',
+                  k_param[0], k_param[0],
+                  k_param[1], k_param[1])
+st.subheader('计算校核')
+check_result = GearDraft.batch_calc(gears, CalcType.CHECK_CONTACT)
+st.table(pack_table(check_result))
+
+check_result = GearDraft.batch_calc(gears, CalcType.CHECK_BENDING)
+st.table(pack_table(check_result))
 # endregion 计算载荷系数
 
 
 # ------------------------------------------------------------
 # region 计算所有尺寸
 # 上文定义了 Zs, diameters, ms
-def calc_gear(m_n, d1, d2, beta, z1, z2, nin, tin):
-    def try_int_parse(x):
-        return str(int(x)) if x == int(x) else f'{x: .3f}'
-    ha_star, c_star = 1, 0.25
-    # 齿根高
-    hf = (ha_star + c_star) * m_n
-    # 齿顶高
-    ha = ha_star * m_n
-    # 全齿高
-    h = ha + hf
-    # 顶隙
-    c = try_int_parse(c_star * m_n)
-    # 节圆直径（标准安装）
-    d_prime = try_int_parse(min(d1, d2))
-    b2 = try_int_parse(d_prime * PHI_D)
-    b1 = try_int_parse(b2 + 6)
-    # 传动比
-    i = f'{d2 / d1: .3f}'
-    # 中心距
-    a = try_int_parse((d1 + d2) / 2)
-    # 模数，法向压力角，螺旋角，分度圆直径，齿根高，齿顶高，全齿高，齿顶圆直径，齿根圆直径，顶隙，中心距，节圆直径，传动比
-    d = d1
-    # 齿顶圆直径
-    da = d + 2 * (int(ha) if ha == int(ha) else ha)
-    da = try_int_parse(da)
-    # 齿根圆直径
-    df = d - 2 * (int(hf) if hf == int(hf) else hf)
-    df = try_int_parse(df)
-    force = try_int_parse(tin / (d / 2))
-    gear1 = [
-        str(m_n), '20', str(beta), try_int_parse(d),
-        try_int_parse(hf), try_int_parse(ha), try_int_parse(h),
-        da, df, c, a, d_prime, i, b1, force, str(z1), try_int_parse(nin)
-    ]
-    d = d2
-    # 齿顶圆直径
-    da = d + 2 * (int(ha) if ha == int(ha) else ha)
-    da = try_int_parse(da)
-    # 齿根圆直径
-    df = d - 2 * (int(hf) if hf == int(hf) else hf)
-    df = try_int_parse(df)
-    force = try_int_parse(tin / (d / 2))
-    nin = try_int_parse(nin / i)
-    gear2 = [
-        str(m_n), '20', str(beta), try_int_parse(d),
-        try_int_parse(hf), try_int_parse(ha), try_int_parse(h),
-        da, df, c, a, d_prime, i, b2, force, str(z2), nin
-    ]
-    return gear1, gear2
-
-
-small_gear, big_gear = calc_gear(
-    ms[0], diameters[0],
-    diameters[1], BETA_1,
-    z1, z2, N_I, T_I)
-gears = [small_gear, big_gear]
-small_gear, big_gear = calc_gear(
-    ms[2], diameters[2],
-    diameters[3], BETA_2,
-    z2, z3, N_II, T_II)
-gears = [*gears, small_gear, big_gear]
 index_names = [
     "模数 (mm)", "法向压力角 (°)", "螺旋角 (度分秒)",
     "分度圆直径 (mm)", "齿根高 (mm)", "齿顶高 (mm)",
@@ -462,8 +385,24 @@ index_names = [
     "切向力 (N)", '径向力 (N)', '轴向力 (N)',
 ]
 gear_names = ['高速级小齿轮', '高速级大齿轮', '低速级小齿轮', '低速级大齿轮']
-gears = list(zip(*gears))
-table = pd.DataFrame(gears, index_names, gear_names)
+data = []
+for g, ii in zip(gears, [i1, i1, i2, i2]):
+    g.process_features()
+    sr = g.get_size()
+    fr = g.get_force()
+    kr = g.get_kinematics()
+    di = [
+        sr.module, str(sr.alpha), str(sr.beta),
+        sr.d, sr.hf, sr.ha, sr.h, sr.da,
+        sr.df, sr.module * 0.25, sr.a,
+        sr.d, ii, sr.b, sr.z, kr.speed,
+        fr.tangent, fr.radial, fr.axial
+    ]
+    di = [tostr(xx, 2) for xx in di]
+    data.append(di)
+
+data = list(zip(*data))
+table = pd.DataFrame(data, index_names, gear_names)
 table = table.rename_axis('项目')
 st.table(table)
 
