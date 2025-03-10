@@ -145,16 +145,17 @@ GearDraft.set_val(
 )
 
 # 计算各级运动学参数
-gears[0].power = INPUT_POWER
+gears[0].output_power = INPUT_POWER
 gears[0].speed = INPUT_SPEED
 
 
-def mesh_gears(_gears):
-    g1 = _gears[0] @ _gears[1]
-    g2 = g1 - _gears[2]
-    _ = g2 @ _gears[3]
-    i1 = _gears[0].gear_ratio(0)
-    i2 = _gears[2].gear_ratio(0)
+def mesh_gears(_gears: list[GearDraft]) -> tuple[float, float]:
+    _gears[0].mesh_with(_gears[1])
+    _gears[1].fix_with(_gears[2])
+    _gears[2].mesh_with(_gears[3])
+    # print([g.recorded_names for g in _gears])
+    i1 = _gears[0].gear_ratio()
+    i2 = _gears[2].gear_ratio()
     return i1, i2
 
 
@@ -272,6 +273,7 @@ st.subheader('选取中心距')
 
 
 def create_z_slider(z, i, s=10):
+    s = int(s)
     return st.select_slider(
         f'$Z_{{\\text{i}}}$', range(z - s, z + s + 1), value=z)
 
@@ -281,8 +283,8 @@ def check_a_for(gear1, gear2):
     GearDraft.batch_calc(gears, CalcType.NORETURN)
     aI = (gear1.d + gear2.d) / 2
     if gear1.is_helical():  # 斜齿轮
-        z1 = create_z_slider(gear1.z, gear1.name)
-        z2 = create_z_slider(gear2.z, gear2.name)
+        z1 = create_z_slider(gear1.z, gear1.name, max(gear1.z / 4, 10))
+        z2 = create_z_slider(gear2.z, gear2.name, max(gear2.z / 4, 10))
         GearDraft.set_val(_gears, 'z', z1, z2)
         GearDraft.batch_calc(_gears, CalcType.NORETURN)
         aI = (gear1.d + gear2.d) / 2
@@ -318,8 +320,12 @@ st.table(pack_table(size))
 
 st.subheader('传动参数')
 i1, i2 = mesh_gears(gears)
-st.write(f'再算高速级转动比 {i1: .2f}，低速级传动比 {i2: .2f}')
 st.write(gears[3].speed_error(input_params['n_out']))
+kine = GearDraft.batch_calc(gears, CalcType.KINEMATICS)
+st.subheader('运动学参数')
+table = pack_table(kine)
+st.table(table)
+st.write(f'再算高速级转动比 {i1: .2f}，低速级传动比 {i2: .2f}')
 # endregion 选取模数、中心距
 
 

@@ -134,6 +134,24 @@ class Angle:
         return np.tan(self.to_radians())
 
 
+def notNone(*args):
+    def check_not_none(value):
+        # 如果值是字典，检查字典中的每个值
+        if isinstance(value, dict):
+            return all(map(check_not_none, value.values()))
+        if isinstance(value, list):
+            return len(value) > 0 and all(map(check_not_none, value))
+        # 对于非字典类型，直接检查是否为 None
+        return value is not None
+    # 使用 all() 函数和生成器表达式检查所有参数
+    values = (check_not_none(arg) for arg in args)
+    false_pos = [i for i, v in enumerate(values) if not v]
+    if false_pos:
+        # print(f"找到 None: {false_pos}")
+        return False
+    return True
+
+
 def try_parse_intstr(fval: float, decimals=2):
     if isinstance(fval, str):
         return fval
@@ -157,8 +175,8 @@ class GearForce(GearDataBase):
         for kin in kinematics:
             temp_dict = {
                 r'切向力': kin.speed,
-                r'径向力': kin.torque,
-                r'轴向力': kin.power,
+                r'径向力': kin.output_torque,
+                r'轴向力': kin.output_power,
             }
             for key, value in temp_dict.items():
                 temp_dict[key] = try_parse_intstr(value, 2)
@@ -182,8 +200,8 @@ class GearKinematics(GearDataBase):
         for kin in kinematics:
             temp_dict = {
                 r'转速 ($rpm$)': kin.speed,
-                r'扭矩 ($N \cdot mm$)': kin.torque,
-                r'功率 ($\text{kW}$)': kin.power,
+                r'扭矩 ($N \cdot mm$)': kin.output_torque,
+                r'功率 ($\text{kW}$)': kin.output_power,
                 r'应力循环次数': f'{kin.nloops: .2e}',
             }
             for key, value in temp_dict.items():
@@ -434,11 +452,11 @@ class GearDraft:
             case CalcType.SOLVE_CONTACT:
                 d_min_list = []
                 for gear in gears:
-                    d_min_list.append(gear.solve_by(0, 'contact'))
+                    d_min_list.append(gear.solve_by(None, 'contact'))
                     gear.process_features()
                 d_min_list.reverse()
                 for gear in gears:
-                    gear.check_mesh(0, True)
+                    gear.check_mesh(None)
                     result.append(GearContactSolveResult(
                         gear.name, d_min_list[-1],
                         gear.module, gear.d
@@ -446,7 +464,7 @@ class GearDraft:
                     d_min_list.pop()
             case CalcType.CHECK_BENDING:
                 for gear in gears:
-                    passed, mmin = gear.check_by(0, 'bending')
+                    passed, mmin = gear.check_by(None, 'bending')
                     gear.process_features()
                     result.append(GearBendingCheckResult(
                         gear.name, gear.d,
@@ -454,7 +472,7 @@ class GearDraft:
                     ))
             case CalcType.CHECK_CONTACT:
                 for gear in gears:
-                    passed, dmin = gear.check_by(0, 'contact')
+                    passed, dmin = gear.check_by(None, 'contact')
                     gear.process_features()
                     result.append(GearContactCheckResult(
                         gear.name, gear.module,
@@ -462,16 +480,16 @@ class GearDraft:
                     ))
             case CalcType.ADJUST_BY_CENTER_DIST:
                 for gear in gears:
-                    gear.check_a(0, True)
+                    gear.adjust_a(None, True)
                     result.append(gear.get_size())
         return result
 
     __slots__ = [
         'name', 'time', 'z', 'module', 'phid',
         'form_factor', 'd', 'b', 'da', 'df', 'alpha', 'beta', 'ha', 'hf', 'h',
-        'torque', 'speed', 'power', 'tangent_force', 'radial_force', 'axial_force',
+        'output_torque', 'speed', 'output_power', 'tangent_force', 'radial_force', 'axial_force',
         'n_round', 'eta', 'material', 'stress_lim', 'safe_factor', 'life_factor',
-        'stress_safe', 'z_elastic', 'k', 'mesh_with', 'a', 'fixed_with'
+        'stress_safe', 'z_elastic', 'k', 'recorded_names', 'meshed_with', 'a', 'fixed_with'
     ]
 
     def __init__(self, idx: str, hours: float):
@@ -490,12 +508,12 @@ class GearDraft:
         self.ha = None  # 齿顶高
         self.hf = None  # 齿根高
         self.h = None  # 全齿高
-        self.torque = None  # 扭矩
+        self.output_torque = None  # 扭矩
         self.speed = None  # 转速
-        self.power = None  # 功率
-        self.tangent_force = None  # 切向力
-        self.radial_force = None  # 径向力
-        self.axial_force = None  # 轴向力
+        self.output_power = None  # 功率
+        self.tangent_force = []  # 切向力
+        self.radial_force = []  # 径向力
+        self.axial_force = []  # 轴向力
         self.n_round = None  # 总转数
         self.eta = None  # 效率
         self.material: MaterialType = None  # 材料
@@ -518,7 +536,8 @@ class GearDraft:
         self.z_elastic = None  # 弹性系数
         self.k = None  # 载荷系数
 
-        self.mesh_with: list[GearDraft] = []  # 与其他齿轮啮合
+        self.recorded_names: dict[str, int] = {}
+        self.meshed_with: list[GearDraft] = []  # 与其他齿轮啮合
         self.a: list[float] = []  # 中心距
         self.fixed_with: list[GearDraft] = []  # 与其他齿轮在一根轴上
 
@@ -526,30 +545,14 @@ class GearDraft:
         '''
         计算齿轮的几何特征
         '''
-        def notNone(*args):
-            def check_not_none(value):
-                # 如果值是字典，检查字典中的每个值
-                if isinstance(value, dict):
-                    return all(map(check_not_none, value.values()))
-                if isinstance(value, list):
-                    return len(value) > 0 and all(map(check_not_none, value))
-                # 对于非字典类型，直接检查是否为 None
-                return value is not None
-            # 使用 all() 函数和生成器表达式检查所有参数
-            values = (check_not_none(arg) for arg in args)
-            false_pos = [i for i, v in enumerate(values) if not v]
-            if false_pos:
-                print(f"找到 None: {false_pos}")
-            return len(false_pos) == 0
-
-        if notNone(self.power, self.speed):
-            self.torque = (self.power * 60e6) / (2 * np.pi * self.speed)
-        elif notNone(self.torque, self.power):
-            self.speed = (60e6 * self.power) / (2 * np.pi * self.torque)
-        elif notNone(self.speed, self.torque):
-            self.power = (self.torque * 2 * np.pi * self.speed) / 60e6
+        if notNone(self.output_power, self.speed):
+            self.output_torque = (self.output_power * 60e6) / (2 * np.pi * self.speed)
+        elif notNone(self.output_torque, self.output_power):
+            self.speed = (60e6 * self.output_power) / (2 * np.pi * self.output_torque)
+        elif notNone(self.speed, self.output_torque):
+            self.output_power = (self.output_torque * 2 * np.pi * self.speed) / 60e6
         else:
-            print("无法计算齿轮的功率、扭矩和转速")
+            # print("无法计算齿轮的功率、扭矩和转速")
             return False
 
         self.n_round = self.time * self.speed * 60
@@ -597,7 +600,7 @@ class GearDraft:
             yfa = yfa(self.z, self.beta)
             self.form_factor = [ysa, ysa, yfa * yfa]
         else:
-            print("无法计算齿形系数")
+            # print("无法计算齿形系数")
             return False
 
         if notNone(self.n_round, self.stress_lim,
@@ -617,7 +620,7 @@ class GearDraft:
             self.stress_safe['bending'] = sigma
             self.life_factor['bending'] = coeff
         else:
-            print("无法计算齿轮的许用接触应力和许用弯曲应力")
+            # print("无法计算齿轮的许用接触应力和许用弯曲应力")
             return False
 
         if notNone(self.z, self.module):
@@ -629,41 +632,71 @@ class GearDraft:
             self.da = self.d + 2 * self.ha
             self.df = self.d - 2 * self.hf
         else:
-            print("无法计算齿轮的几何特征")
+            # print("无法计算齿轮的几何特征")
             return False
 
-        self.tangent_force = 2 * self.torque / self.d
+        self.tangent_force = 2 * self.output_torque / self.d
         self.radial_force = self.tangent_force * self.alpha.tan()
         self.axial_force = self.tangent_force * self.beta.tan()
 
         return True
 
-    def __matmul__(self, gear2: 'GearDraft') -> "GearDraft":
+    def mesh_with(self, gear2: 'GearDraft', forward: bool = True) -> "GearDraft":
         '''
         将两个齿轮啮合在一起，计算第二个齿轮上的运动学参数
         '''
+        if gear2.name not in self.recorded_names:
+            self.recorded_names[gear2.name] = len(self.meshed_with)
+            self.meshed_with.append(gear2)
+        if self.name not in gear2.recorded_names:
+            gear2.recorded_names[self.name] = len(gear2.meshed_with)
+            gear2.meshed_with.append(self)
+
         self.process_features()
         gear2.process_features()
-        i = self.z / gear2.z
-        gear2.torque = self.torque / i
-        gear2.speed = self.speed * i
-        gear2.power = self.power * self.eta
-        if self.axial_force is not None:
-            gear2.axial_force = -self.axial_force
-        self.mesh_with.append(gear2)
-        gear2.mesh_with.append(self)
-        return gear2
 
-    def __sub__(self, gear2: 'GearDraft') -> "GearDraft":
+        if not forward:
+            self1, gear2 = gear2, self
+        else:
+            self1 = self
+
+        i = self1.z / gear2.z
+        gear2.output_torque = self1.output_torque / i
+        gear2.speed = self1.speed * i
+        gear2.output_power = self1.output_power * self1.eta
+        if self1.axial_force is not None:
+            gear2.axial_force = -self1.axial_force
+
+        self.process_features()
+        gear2.process_features()
+        return self, gear2
+
+    def fix_with(self, gear2: 'GearDraft', forward: bool = True) -> "GearDraft":
         '''
-        将两个齿轮放在一个轴上，计算第二个齿轮上的运动学参数
+        将两个齿轮啮合在一起，计算第二个齿轮上的运动学参数
         '''
-        gear2.torque = self.torque
-        gear2.speed = self.speed
-        gear2.power = self.power
-        self.fixed_with.append(gear2)
-        gear2.fixed_with.append(self)
-        return gear2
+        if gear2.name not in self.recorded_names:
+            self.recorded_names[gear2.name] = len(self.fixed_with)
+            self.fixed_with.append(gear2)
+        if self.name not in gear2.recorded_names:
+            gear2.recorded_names[self.name] = len(gear2.fixed_with)
+            gear2.fixed_with.append(self)
+
+        self.process_features()
+        gear2.process_features()
+
+        if not forward:
+            self1, gear2 = gear2, self
+        else:
+            self1, gear2 = self, gear2
+
+        gear2.output_torque = self1.output_torque
+        gear2.speed = self1.speed
+        gear2.output_power = self1.output_power
+
+        self.process_features()
+        gear2.process_features()
+        return self, gear2
 
     def get_force(self):
         return GearForce(
@@ -673,14 +706,16 @@ class GearDraft:
             self.axial_force
         )
 
-    def get_kinematics(self):
+    def get_kinematics(self, meshed_name):
+        meshidx = self._get_default_meshidx(meshed_name)
         if self.d is not None:
             velocity = self.speed * self.d * np.pi / 60e3
-        else: velocity = None
+        else:
+            velocity = None
         return GearKinematics(
             self.name, self.speed,
-            velocity, self.torque,
-            self.power, self.n_round
+            velocity, self.output_torque,
+            self.output_power, self.n_round
         )
 
     def get_material(self):
@@ -693,8 +728,13 @@ class GearDraft:
             self.z_elastic
         )
 
-    def gear_ratio(self, mesh_idx=0):
-        return self.mesh_with[mesh_idx].z / self.z
+    def _get_default_meshidx(self, name):
+        if name is None:
+            name = list(self.recorded_names.keys())[0]
+        return self.recorded_names[name]
+
+    def gear_ratio(self, meshed_name=None):
+        return self.meshed_with[self._get_default_meshidx(meshed_name)].z / self.z
 
     def get_form_factor(self) -> float:
         return GearFormFactor(self.name, *self.form_factor)
@@ -706,7 +746,7 @@ class GearDraft:
             self.h, self.b, self.a[0]
         )
 
-    def _calc_min_d(self, mesh_idx):
+    def _calc_min_d(self, sigma, u):
         zh = 2.5  # 计算区域系数。例如，普通圆柱齿轮通常为 2.5。
         if float(self.beta) >= 7.:
             # 认为只有 β >= 7° 才算斜齿轮
@@ -716,20 +756,19 @@ class GearDraft:
             zh = np.sqrt(2 * np.cos(beta_b) * np.cos(alpha_t_1) / (
                 np.cos(alpha_t) ** 2 * np.sin(alpha_t_1)
             ))  # 计算区域系数
-        # print(k_, t_, u_, beta, zh, ZE, sigh)
-        z1, z2 = self.z, self.mesh_with[mesh_idx].z
-        u = max(z1, z2) / min(z1, z2)
+        print(u, self.output_torque, self.phid, self.k, self.beta.cos(),
+              self.z_elastic, sigma, zh)
         return (
-            2 * self.k * self.torque / self.phid *
+            2 * self.k * self.output_torque / self.phid *
             (u + 1) / u * self.beta.cos() *
-            (zh * self.z_elastic / self.stress_safe['contact']) ** 2
+            (zh * self.z_elastic / sigma) ** 2
         ) ** (1 / 3)
 
     def _calc_min_m(self, explicit=False):
         z1 = self.z / self.beta.cos()  # 修正齿数
         if not explicit:
             return (
-                2 * self.k * self.torque / self.phid / z1**2 *
+                2 * self.k * self.output_torque / self.phid / z1**2 *
                 self.form_factor[2] / self.stress_safe['bending']
             ) ** (1 / 3)
         # 计算 Y_{\beta}
@@ -740,43 +779,52 @@ class GearDraft:
         y_beta = 1 - eps_beta * float(beta) / 120
         y_beta = max(y_beta_min, y_beta, 0.75)
         return (
-            2 * self.k * y_beta * self.torque / self.phid / z1**2 *
+            2 * self.k * y_beta * self.output_torque / self.phid / z1**2 *
             self.form_factor[2] / self.stress_safe['bending']
         ) ** (1 / 3)
 
-    def solve_by(self, mesh_idx=0, stype='contact'):
+    def solve_by(self, meshed_name=None, stype='contact'):
         if stype == 'contact':
-            d_min = self._calc_min_d(mesh_idx)
-            m = d_min / self.z * self.beta.cos()
+            mesh_idx = self._get_default_meshidx(meshed_name)
+            gear2 = self.meshed_with[mesh_idx]
+            z1, z2 = self.z, gear2.z
+            zmin = min(z1, z2)
+            u = max(z1, z2) / zmin
+            sigma_h = min(self.stress_safe['contact'],
+                          gear2.stress_safe['contact'])
+            d_min1 = self._calc_min_d(sigma_h, u)
+            d_min2 = gear2._calc_min_d(sigma_h, u)
+            d_min = max(d_min1, d_min2)
+            m = d_min / zmin * self.beta.cos()
             m_std = min(GearDraft.M_SERIES,
                         key=lambda x: x - m if x > m else np.inf)
             self.module = m_std
+            gear2.module = m_std
             return d_min
         if stype == 'bending':
             raise NotImplementedError("弯曲应力计算尚未实现")
             # m_min = self._calc_min_m()
         raise ValueError("错误的计算类型，只能为 `contact` 或 `bending` 。")
 
-    def check_mesh(self, mesh_idx=0, auto_refresh=True):
-        module2 = self.mesh_with[mesh_idx].module
-        if module2 != self.module:
-            module = max(self.module, module2)
-            self.module = module
-            self.mesh_with[mesh_idx].module = module
-            if auto_refresh:
-                self.process_features()
-                self.mesh_with[mesh_idx].process_features()
+    def check_mesh(self, meshed_name=None):
+        mesh_idx = self._get_default_meshidx(meshed_name)
+        gear2 = self.meshed_with[mesh_idx]
+        if notNone(self.module, gear2.module) and self.module != gear2.module:
+                raise ValueError('模数不匹配')
+        if self.beta != gear2.beta:
+            raise ValueError('螺旋角不匹配')
 
-    def check_a(self, mesh_idx=0, auto_refresh=True):
-        z1, z2 = self.z, self.mesh_with[mesh_idx].z
-        if self.a != self.mesh_with[mesh_idx].a:
+    def adjust_a(self, meshed_name=0, auto_refresh=True):
+        mesh_idx = self._get_default_meshidx(meshed_name)
+        z1, z2 = self.z, self.meshed_with[mesh_idx].z
+        if self.a != self.meshed_with[mesh_idx].a:
             raise ValueError('两啮合齿轮的中心距不等！')
-        a = (self.d + self.mesh_with[mesh_idx].d) / 2
+        a = (self.d + self.meshed_with[mesh_idx].d) / 2
         if self.a[mesh_idx] != a:
             if float(self.beta) == 0:
                 raise ValueError('直齿轮中心距错误值')
             # 修正 Beta
-            print(self.module,  (z1 + z2), self.a[mesh_idx])
+            # print(self.module,  (z1 + z2), self.a[mesh_idx])
             self.beta = Angle(np.rad2deg(
                 np.arccos(
                     self.module * (z1 + z2) / 2 / self.a[mesh_idx]
@@ -784,16 +832,25 @@ class GearDraft:
             ))
             if auto_refresh:
                 self.process_features()
-                self.mesh_with[mesh_idx].process_features()
+                self.meshed_with[mesh_idx].process_features()
 
-    def check_by(self, mesh_idx=0, stype='contact'):
+    def check_by(self, meshed_name=None, stype='contact'):
         if stype == 'bending':
             m_min = self._calc_min_m(True)
             if self.module >= m_min:
                 return True, m_min
             return False, m_min
         if stype == 'contact':
-            d_min = self._calc_min_d(mesh_idx)
+            mesh_idx = self._get_default_meshidx(meshed_name)
+            gear2 = self.meshed_with[mesh_idx]
+            z1, z2 = self.z, gear2.z
+            zmin = min(z1, z2)
+            u = max(z1, z2) / zmin
+            sigma_h = min(self.stress_safe['contact'],
+                          gear2.stress_safe['contact'])
+            d_min1 = self._calc_min_d(sigma_h, u)
+            d_min2 = gear2._calc_min_d(sigma_h, u)
+            d_min = max(d_min1, d_min2)
             if self.d >= d_min:
                 return True, d_min
             return False, d_min
