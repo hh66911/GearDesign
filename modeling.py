@@ -530,7 +530,9 @@ class GearDraft:
             def check_not_none(value):
                 # 如果值是字典，检查字典中的每个值
                 if isinstance(value, dict):
-                    return all(check_not_none(v) for v in value.values())
+                    return all(map(check_not_none, value.values()))
+                if isinstance(value, list):
+                    return len(value) > 0 and all(map(check_not_none, value))
                 # 对于非字典类型，直接检查是否为 None
                 return value is not None
             # 使用 all() 函数和生成器表达式检查所有参数
